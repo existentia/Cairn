@@ -747,6 +747,7 @@ def boe_base_rate():
     """Fetch Bank of England base rate history from their public statistical API.
     Caches for 24 hours since it only changes ~8 times a year."""
     import urllib.request
+    import http.cookiejar
     import csv
     import io
 
@@ -758,21 +759,39 @@ def boe_base_rate():
         if age < 86400:
             return jsonify(BOE_RATE_CACHE["data"])
 
-    # BoE Statistical Interactive Database — IUDBEDR (Official Bank Rate)
-    # CSV endpoint with date range
+    # BoE requires cookies — use a cookie-enabled opener
     try:
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,text/csv,text/plain,*/*",
+        }
+
+        # Step 1: Hit the main database page to establish a session and get cookies
+        init_req = urllib.request.Request(
+            "https://www.bankofengland.co.uk/boeapps/database/",
+            headers=headers,
+        )
+        opener.open(init_req, timeout=10)
+
+        # Step 2: Fetch the CSV data using the documented API endpoint
         from_date = "01/Jan/2000"
         to_date = now.strftime("%d/%b/%Y")
-        url = (
-            f"https://www.bankofengland.co.uk/boeapps/database/fromshowcolumns.asp"
-            f"?Travel=NIxAZxSUx&FromSeries=1&ToSeries=50&DAession=DA"
-            f"&Ession=DA&SeriesCodes=IUDBEDR&UsingCodes=Y"
-            f"&CSVF=TN&Datefrom={from_date}&Dateto={to_date}&VPD=Y"
+        csv_url = (
+            f"https://www.bankofengland.co.uk/boeapps/database/"
+            f"_iadb-fromshowcolumns.asp?csv.x=yes"
+            f"&Datefrom={from_date}&Dateto={to_date}"
+            f"&SeriesCodes=IUDBEDR&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N"
         )
 
-        req = urllib.request.Request(url, headers={"User-Agent": "Cairn/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        csv_req = urllib.request.Request(csv_url, headers=headers)
+        with opener.open(csv_req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
+
+        # Check if we got HTML instead of CSV (cookie/redirect issue)
+        if "<!DOCTYPE" in raw[:100] or "<html" in raw[:100].lower():
+            raise ValueError("BoE returned HTML instead of CSV — cookie session may have failed")
 
         # Parse CSV — BoE format: DATE, VALUE
         rates = []
@@ -782,63 +801,105 @@ def boe_base_rate():
                 date_str = row[0].strip()
                 rate_str = row[1].strip()
                 try:
-                    # BoE dates are DD MMM YYYY format
                     d = datetime.strptime(date_str, "%d %b %Y")
                     r = float(rate_str)
                     rates.append({"date": d.strftime("%Y-%m-%d"), "rate": r})
                 except (ValueError, TypeError):
                     continue
 
-        if rates:
-            # Sort by date
-            rates.sort(key=lambda x: x["date"])
+        if not rates:
+            raise ValueError("No rate data parsed from BoE CSV response")
 
-            # Build a monthly series (take the rate at start of each month)
-            monthly = []
-            current_rate = rates[0]["rate"]
-            rate_idx = 0
+        # Sort by date
+        rates.sort(key=lambda x: x["date"])
 
-            start_year = int(rates[0]["date"][:4])
-            end_year = now.year
+        # Build a monthly series
+        monthly = []
+        current_rate = rates[0]["rate"]
+        rate_idx = 0
+        start_year = int(rates[0]["date"][:4])
 
-            for year in range(start_year, end_year + 1):
-                for month in range(1, 13):
-                    if year == end_year and month > now.month:
-                        break
-                    month_start = f"{year}-{month:02d}-01"
+        for year in range(start_year, now.year + 1):
+            for month in range(1, 13):
+                if year == now.year and month > now.month:
+                    break
+                month_start = f"{year}-{month:02d}-01"
+                while rate_idx < len(rates) - 1 and rates[rate_idx + 1]["date"] <= month_start:
+                    rate_idx += 1
+                    current_rate = rates[rate_idx]["rate"]
+                monthly.append({"date": month_start, "rate": current_rate})
 
-                    # Advance to latest rate before this month
-                    while rate_idx < len(rates) - 1 and rates[rate_idx + 1]["date"] <= month_start:
-                        rate_idx += 1
-                        current_rate = rates[rate_idx]["rate"]
+        result = {
+            "current_rate": rates[-1]["rate"],
+            "current_date": rates[-1]["date"],
+            "history": monthly,
+            "changes": rates[-20:],
+        }
 
-                    monthly.append({"date": month_start, "rate": current_rate})
+        BOE_RATE_CACHE["data"] = result
+        BOE_RATE_CACHE["fetched"] = now
 
-            result = {
-                "current_rate": rates[-1]["rate"],
-                "current_date": rates[-1]["date"],
-                "history": monthly,
-                "changes": rates[-20:],  # Last 20 rate changes
-            }
-
-            BOE_RATE_CACHE["data"] = result
-            BOE_RATE_CACHE["fetched"] = now
-
-            return jsonify(result)
-        else:
-            return jsonify({"error": "No rate data parsed from BoE response"}), 502
+        return jsonify(result)
 
     except Exception as e:
-        # If live fetch fails, return hardcoded recent data as fallback
-        fallback = {
-            "current_rate": 4.5,
-            "current_date": "2025-02-06",
-            "history": [],
-            "changes": [],
+        # Comprehensive fallback — BoE base rate history (key change dates)
+        fallback_changes = [
+            {"date": "2000-02-10", "rate": 6.00}, {"date": "2001-02-08", "rate": 5.75},
+            {"date": "2001-04-05", "rate": 5.50}, {"date": "2001-05-10", "rate": 5.25},
+            {"date": "2001-08-02", "rate": 5.00}, {"date": "2001-09-18", "rate": 4.75},
+            {"date": "2001-10-04", "rate": 4.50}, {"date": "2001-11-08", "rate": 4.00},
+            {"date": "2003-02-06", "rate": 3.75}, {"date": "2003-07-10", "rate": 3.50},
+            {"date": "2003-11-06", "rate": 3.75}, {"date": "2004-02-05", "rate": 4.00},
+            {"date": "2004-05-06", "rate": 4.25}, {"date": "2004-06-10", "rate": 4.50},
+            {"date": "2004-08-05", "rate": 4.75}, {"date": "2005-08-04", "rate": 4.50},
+            {"date": "2006-08-03", "rate": 4.75}, {"date": "2006-11-09", "rate": 5.00},
+            {"date": "2007-01-11", "rate": 5.25}, {"date": "2007-05-10", "rate": 5.50},
+            {"date": "2007-07-05", "rate": 5.75}, {"date": "2007-12-06", "rate": 5.50},
+            {"date": "2008-02-07", "rate": 5.25}, {"date": "2008-04-10", "rate": 5.00},
+            {"date": "2008-10-08", "rate": 4.50}, {"date": "2008-11-06", "rate": 3.00},
+            {"date": "2008-12-04", "rate": 2.00}, {"date": "2009-01-08", "rate": 1.50},
+            {"date": "2009-02-05", "rate": 1.00}, {"date": "2009-03-05", "rate": 0.50},
+            {"date": "2016-08-04", "rate": 0.25}, {"date": "2017-11-02", "rate": 0.50},
+            {"date": "2018-08-02", "rate": 0.75}, {"date": "2020-03-11", "rate": 0.25},
+            {"date": "2020-03-19", "rate": 0.10}, {"date": "2021-12-16", "rate": 0.25},
+            {"date": "2022-02-03", "rate": 0.50}, {"date": "2022-03-17", "rate": 0.75},
+            {"date": "2022-05-05", "rate": 1.00}, {"date": "2022-06-16", "rate": 1.25},
+            {"date": "2022-08-04", "rate": 1.75}, {"date": "2022-09-22", "rate": 2.25},
+            {"date": "2022-11-03", "rate": 3.00}, {"date": "2022-12-15", "rate": 3.50},
+            {"date": "2023-02-02", "rate": 4.00}, {"date": "2023-03-23", "rate": 4.25},
+            {"date": "2023-05-11", "rate": 4.50}, {"date": "2023-06-22", "rate": 5.00},
+            {"date": "2023-08-03", "rate": 5.25}, {"date": "2024-08-01", "rate": 5.00},
+            {"date": "2024-11-07", "rate": 4.75}, {"date": "2025-02-06", "rate": 4.50},
+        ]
+
+        # Build monthly from fallback
+        monthly = []
+        fc = fallback_changes
+        rate_idx = 0
+        current_rate = fc[0]["rate"]
+        for year in range(2000, now.year + 1):
+            for month in range(1, 13):
+                if year == now.year and month > now.month:
+                    break
+                ms = f"{year}-{month:02d}-01"
+                while rate_idx < len(fc) - 1 and fc[rate_idx + 1]["date"] <= ms:
+                    rate_idx += 1
+                    current_rate = fc[rate_idx]["rate"]
+                monthly.append({"date": ms, "rate": current_rate})
+
+        result = {
+            "current_rate": fc[-1]["rate"],
+            "current_date": fc[-1]["date"],
+            "history": monthly,
+            "changes": fc[-20:],
             "fallback": True,
-            "error": str(e),
+            "fetch_error": str(e),
         }
-        return jsonify(fallback)
+
+        BOE_RATE_CACHE["data"] = result
+        BOE_RATE_CACHE["fetched"] = now
+
+        return jsonify(result)
 
 
 @app.route("/api/tools/mortgage-scenarios", methods=["POST"])
