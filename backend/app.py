@@ -102,6 +102,8 @@ def init_db():
             isa_allowance REAL NOT NULL DEFAULT 20000,
             pension_annual_allowance REAL NOT NULL DEFAULT 60000,
             tax_year TEXT NOT NULL DEFAULT '2025/26',
+            tracker_margin REAL NOT NULL DEFAULT 0.5,
+            mortgage_remaining_years INTEGER NOT NULL DEFAULT 20,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -119,6 +121,18 @@ def init_db():
         -- Clean expired tokens on init
         DELETE FROM auth_tokens WHERE expires_at < datetime('now');
     """)
+    db.commit()
+
+    # Migrate existing databases — add new columns if missing
+    cursor = db.execute("PRAGMA table_info(settings)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    migrations = [
+        ("tracker_margin", "REAL NOT NULL DEFAULT 0.5"),
+        ("mortgage_remaining_years", "INTEGER NOT NULL DEFAULT 20"),
+    ]
+    for col_name, col_def in migrations:
+        if col_name not in existing_cols:
+            db.execute(f"ALTER TABLE settings ADD COLUMN {col_name} {col_def}")
     db.commit()
     db.close()
 
@@ -337,12 +351,14 @@ def update_settings():
         UPDATE settings SET
             growth_rate = ?, inflation_rate = ?, isa_allowance = ?,
             pension_annual_allowance = ?, tax_year = ?,
+            tracker_margin = ?, mortgage_remaining_years = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
         data.get("growth_rate", 5.0), data.get("inflation_rate", 2.5),
         data.get("isa_allowance", 20000), data.get("pension_annual_allowance", 60000),
         data.get("tax_year", "2025/26"),
+        data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
     ))
     db.commit()
     return jsonify({"ok": True})
@@ -422,11 +438,14 @@ def import_data():
         s = data["settings"]
         db.execute("""
             UPDATE settings SET growth_rate=?, inflation_rate=?, isa_allowance=?,
-                pension_annual_allowance=?, tax_year=?, updated_at=datetime('now')
+                pension_annual_allowance=?, tax_year=?,
+                tracker_margin=?, mortgage_remaining_years=?,
+                updated_at=datetime('now')
             WHERE id = 1
         """, (s.get("growth_rate",5.0), s.get("inflation_rate",2.5),
               s.get("isa_allowance",20000), s.get("pension_annual_allowance",60000),
-              s.get("tax_year","2025/26")))
+              s.get("tax_year","2025/26"),
+              s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20)))
 
     if "snapshots" in data:
         for snap in data["snapshots"]:

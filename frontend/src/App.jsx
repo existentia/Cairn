@@ -718,7 +718,7 @@ export default function App() {
 
         {/* ── RATES & MORTGAGE ───────────────────────────────── */}
         {tab === "rates" && (
-          <RatesMortgageTab accounts={accounts} />
+          <RatesMortgageTab accounts={accounts} settings={settings} onSaveSettings={saveSettings} addToast={addToast} />
         )}
 
         {/* ── TOOLS ────────────────────────────────────────────── */}
@@ -1101,7 +1101,7 @@ function AICopilotTab() {
    RATES & MORTGAGE TAB
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function RatesMortgageTab({ accounts }) {
+function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
   const [rateData, setRateData] = useState(null);
   const [scenarios, setScenarios] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1109,18 +1109,21 @@ function RatesMortgageTab({ accounts }) {
   const [chartRange, setChartRange] = useState("10y");
 
   const mortgage = accounts.find(a => a.type === "MORTGAGE") || null;
-  const [margin, setMargin] = useState(0.5);
-  const [remainingYears, setRemainingYears] = useState(20);
+  const [margin, setMargin] = useState(settings?.tracker_margin ?? 0.5);
+  const [remainingYears, setRemainingYears] = useState(settings?.mortgage_remaining_years ?? 20);
 
-  // Derive remaining years from term_end_date if available
+  // Initialise from settings, fall back to term_end_date calculation
   useEffect(() => {
-    if (mortgage?.term_end_date) {
+    if (settings?.tracker_margin != null) setMargin(settings.tracker_margin);
+    if (settings?.mortgage_remaining_years != null && settings.mortgage_remaining_years > 0) {
+      setRemainingYears(settings.mortgage_remaining_years);
+    } else if (mortgage?.term_end_date) {
       const end = new Date(mortgage.term_end_date);
       const now = new Date();
       const yrs = Math.max(1, Math.round((end - now) / (365.25 * 24 * 60 * 60 * 1000)));
       setRemainingYears(yrs);
     }
-  }, [mortgage]);
+  }, [settings, mortgage]);
 
   useEffect(() => {
     (async () => {
@@ -1292,9 +1295,13 @@ function RatesMortgageTab({ accounts }) {
       {mortgage && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 12px" }}>Mortgage Configuration</h3>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <Field label="Tracker Margin (above BBR)" type="number" value={margin} onChange={v => setMargin(v)} suffix="%" small />
             <Field label="Remaining Years" type="number" value={remainingYears} onChange={v => setRemainingYears(v)} small />
+            <Btn onClick={async () => {
+              await onSaveSettings({ ...settings, tracker_margin: margin, mortgage_remaining_years: remainingYears });
+              addToast("Mortgage config saved", "success");
+            }} style={{ marginBottom: 1 }}>Save</Btn>
           </div>
         </div>
       )}
