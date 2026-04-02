@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  cairn:
+    build: .
+    container_name: cairn
+    restart: unless-stopped
+    ports:
+      - "8070:8000"
+    volumes:
+      - cairn_data:/app/data
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-to-a-random-string}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  cairn_data:
+    driver: local
