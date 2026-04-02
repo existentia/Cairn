@@ -108,15 +108,22 @@ def init_db():
         -- Seed defaults if empty
         INSERT OR IGNORE INTO profile (id) VALUES (1);
         INSERT OR IGNORE INTO settings (id) VALUES (1);
+
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at TEXT NOT NULL DEFAULT (datetime('now', '+7 days'))
+        );
+
+        -- Clean expired tokens on init
+        DELETE FROM auth_tokens WHERE expires_at < datetime('now');
     """)
     db.commit()
     db.close()
 
 
-# ── Auth (simple session token) ──────────────────────────────────────────────
-
-active_tokens = {}
-
+# ── Auth (SQLite-backed tokens — survives across gunicorn workers) ────────────
 
 def require_auth(f):
     @wraps(f)
@@ -124,7 +131,12 @@ def require_auth(f):
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            if token in active_tokens:
+            db = get_db()
+            row = db.execute(
+                "SELECT token FROM auth_tokens WHERE token = ? AND expires_at > datetime('now')",
+                (token,)
+            ).fetchone()
+            if row:
                 return f(*args, **kwargs)
         return jsonify({"error": "Unauthorized"}), 401
     return decorated
@@ -139,7 +151,15 @@ def login():
     password = data.get("password", "")
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         token = secrets.token_hex(32)
-        active_tokens[token] = {"user": username, "created": datetime.now().isoformat()}
+        db = get_db()
+        # Clean up expired tokens
+        db.execute("DELETE FROM auth_tokens WHERE expires_at < datetime('now')")
+        # Insert new token (7-day expiry)
+        db.execute(
+            "INSERT INTO auth_tokens (token, username, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+            (token, username)
+        )
+        db.commit()
         return jsonify({"token": token, "username": username})
     return jsonify({"error": "Invalid credentials"}), 401
 
@@ -148,7 +168,9 @@ def login():
 @require_auth
 def logout():
     token = request.headers.get("Authorization", "")[7:]
-    active_tokens.pop(token, None)
+    db = get_db()
+    db.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
+    db.commit()
     return jsonify({"ok": True})
 
 

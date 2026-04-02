@@ -58,7 +58,53 @@ const globalStyles = `
   ::selection { background: ${T.accent}33; }
   ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: ${T.bg}; }
   ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
+  @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
 `;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOAST NOTIFICATION SYSTEM
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+let toastIdCounter = 0;
+
+function useToast() {
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = useCallback((message, type = "success") => {
+    const id = ++toastIdCounter;
+    setToasts((prev) => [...prev, { id, message, type, exiting: false }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.map((t) => t.id === id ? { ...t, exiting: true } : t));
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 300);
+    }, 3000);
+  }, []);
+
+  const ToastContainer = useCallback(() => (
+    <div style={{ position: "fixed", top: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
+      {toasts.map((t) => {
+        const colors = { success: T.green, error: T.red, info: T.blue, warning: T.amber };
+        const icons = { success: "✓", error: "✕", info: "ℹ", warning: "▲" };
+        return (
+          <div key={t.id} style={{
+            background: T.surface, border: `1px solid ${colors[t.type] || T.border}`,
+            borderLeft: `3px solid ${colors[t.type] || T.accent}`,
+            borderRadius: T.radius, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10,
+            animation: `${t.exiting ? "toast-out" : "toast-in"} 0.3s ease forwards`,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+          }}>
+            <span style={{ color: colors[t.type], fontSize: 14, fontWeight: 700 }}>{icons[t.type]}</span>
+            <span style={{ fontSize: 12.5, color: T.text }}>{t.message}</span>
+          </div>
+        );
+      })}
+    </div>
+  ), [toasts]);
+
+  return { addToast, ToastContainer };
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SHARED COMPONENTS
@@ -150,9 +196,12 @@ function Btn({ children, onClick, variant = "primary", style: extraStyle }) {
 }
 
 const ttStyle = {
-  backgroundColor: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-  fontSize: 12, color: T.text, padding: "8px 12px",
+  backgroundColor: "#1a1f2e", border: `1px solid ${T.borderLight}`, borderRadius: T.radius,
+  fontSize: 12, color: "#f0f1f5", padding: "10px 14px",
+  boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
 };
+const ttItemStyle = { color: "#f0f1f5", fontSize: 12, padding: "2px 0" };
+const ttLabelStyle = { color: "#b0b4c4", fontSize: 11, fontWeight: 600, marginBottom: 4 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LOGIN SCREEN
@@ -308,6 +357,7 @@ export default function App() {
   const [editId, setEditId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { addToast, ToastContainer } = useToast();
 
   // Check auth on mount
   useEffect(() => {
@@ -332,6 +382,7 @@ export default function App() {
   const handleLogin = async () => {
     setAuthed(true);
     await loadData();
+    addToast("Signed in successfully", "success");
   };
 
   const handleLogout = async () => {
@@ -340,51 +391,86 @@ export default function App() {
     setData(null);
   };
 
-  // CRUD helpers
+  // CRUD helpers — all with toast feedback
   const saveProfile = async (profile) => {
     setSaving(true);
-    await api.updateProfile(profile);
-    await loadData();
+    try {
+      await api.updateProfile(profile);
+      await loadData();
+      addToast("Profile saved", "success");
+    } catch (e) {
+      addToast("Failed to save profile", "error");
+    }
     setSaving(false);
   };
 
   const saveSettings = async (settings) => {
     setSaving(true);
-    await api.updateSettings(settings);
-    await loadData();
+    try {
+      await api.updateSettings(settings);
+      await loadData();
+      addToast("Settings saved", "success");
+    } catch (e) {
+      addToast("Failed to save settings", "error");
+    }
     setSaving(false);
   };
 
   const addAccount = async (account) => {
-    await api.createAccount(account);
-    setShowAdd(false);
-    await loadData();
+    try {
+      await api.createAccount(account);
+      setShowAdd(false);
+      await loadData();
+      addToast(`${account.name} added`, "success");
+    } catch (e) {
+      addToast("Failed to add account", "error");
+    }
   };
 
   const saveAccount = async (account) => {
-    await api.updateAccount(account.id, account);
-    setEditId(null);
-    await loadData();
+    try {
+      await api.updateAccount(account.id, account);
+      setEditId(null);
+      await loadData();
+      addToast(`${account.name} updated`, "success");
+    } catch (e) {
+      addToast("Failed to update account", "error");
+    }
   };
 
   const removeAccount = async (id) => {
-    await api.deleteAccount(id);
-    setEditId(null);
-    await loadData();
+    try {
+      await api.deleteAccount(id);
+      setEditId(null);
+      await loadData();
+      addToast("Account deleted", "success");
+    } catch (e) {
+      addToast("Failed to delete account", "error");
+    }
   };
 
   const takeSnapshot = async () => {
-    await api.takeSnapshot();
-    await loadData();
+    try {
+      await api.takeSnapshot();
+      await loadData();
+      addToast("Snapshot recorded", "success");
+    } catch (e) {
+      addToast("Failed to take snapshot", "error");
+    }
   };
 
   const exportData = async () => {
-    const d = await api.exportData();
-    const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `cairn-export-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click(); URL.revokeObjectURL(url);
+    try {
+      const d = await api.exportData();
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `cairn-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click(); URL.revokeObjectURL(url);
+      addToast("Export downloaded", "success");
+    } catch (e) {
+      addToast("Export failed", "error");
+    }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -435,6 +521,7 @@ export default function App() {
   return (
     <>
       <style>{globalStyles}</style>
+      <ToastContainer />
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>
 
         {/* Header */}
@@ -479,7 +566,7 @@ export default function App() {
                     <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
                     <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                    <Tooltip contentStyle={ttStyle} formatter={(v) => fmtFull(v)} />
+                    <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} />
                     <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -500,7 +587,7 @@ export default function App() {
                         <Pie data={allocationData} cx="50%" cy="50%" innerRadius={50} outerRadius={82} paddingAngle={3} dataKey="value">
                           {allocationData.map((_, i) => <Cell key={i} fill={T.chartPalette[i % T.chartPalette.length]} />)}
                         </Pie>
-                        <Tooltip contentStyle={ttStyle} formatter={(v) => fmtFull(v)} />
+                        <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 14px", marginTop: 6 }}>
@@ -577,7 +664,7 @@ export default function App() {
                   <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                   <XAxis dataKey="year" tick={{ fontSize: 10, fill: T.textDim }} />
                   <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                  <Tooltip contentStyle={ttStyle} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
+                  <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
                   <Area type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
                   <Area type="monotone" dataKey="isas" name="ISAs" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
