@@ -737,6 +737,200 @@ def debt_payoff_calc():
     })
 
 
+# ── BoE Base Rate Data ────────────────────────────────────────────────────────
+
+BOE_RATE_CACHE = {"data": None, "fetched": None}
+
+@app.route("/api/rates/boe-base-rate", methods=["GET"])
+@require_auth
+def boe_base_rate():
+    """Fetch Bank of England base rate history from their public statistical API.
+    Caches for 24 hours since it only changes ~8 times a year."""
+    import urllib.request
+    import csv
+    import io
+
+    now = datetime.now()
+
+    # Return cache if less than 24h old
+    if BOE_RATE_CACHE["data"] and BOE_RATE_CACHE["fetched"]:
+        age = (now - BOE_RATE_CACHE["fetched"]).total_seconds()
+        if age < 86400:
+            return jsonify(BOE_RATE_CACHE["data"])
+
+    # BoE Statistical Interactive Database — IUDBEDR (Official Bank Rate)
+    # CSV endpoint with date range
+    try:
+        from_date = "01/Jan/2000"
+        to_date = now.strftime("%d/%b/%Y")
+        url = (
+            f"https://www.bankofengland.co.uk/boeapps/database/fromshowcolumns.asp"
+            f"?Travel=NIxAZxSUx&FromSeries=1&ToSeries=50&DAession=DA"
+            f"&Ession=DA&SeriesCodes=IUDBEDR&UsingCodes=Y"
+            f"&CSVF=TN&Datefrom={from_date}&Dateto={to_date}&VPD=Y"
+        )
+
+        req = urllib.request.Request(url, headers={"User-Agent": "Cairn/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+
+        # Parse CSV — BoE format: DATE, VALUE
+        rates = []
+        reader = csv.reader(io.StringIO(raw))
+        for row in reader:
+            if len(row) >= 2:
+                date_str = row[0].strip()
+                rate_str = row[1].strip()
+                try:
+                    # BoE dates are DD MMM YYYY format
+                    d = datetime.strptime(date_str, "%d %b %Y")
+                    r = float(rate_str)
+                    rates.append({"date": d.strftime("%Y-%m-%d"), "rate": r})
+                except (ValueError, TypeError):
+                    continue
+
+        if rates:
+            # Sort by date
+            rates.sort(key=lambda x: x["date"])
+
+            # Build a monthly series (take the rate at start of each month)
+            monthly = []
+            current_rate = rates[0]["rate"]
+            rate_idx = 0
+
+            start_year = int(rates[0]["date"][:4])
+            end_year = now.year
+
+            for year in range(start_year, end_year + 1):
+                for month in range(1, 13):
+                    if year == end_year and month > now.month:
+                        break
+                    month_start = f"{year}-{month:02d}-01"
+
+                    # Advance to latest rate before this month
+                    while rate_idx < len(rates) - 1 and rates[rate_idx + 1]["date"] <= month_start:
+                        rate_idx += 1
+                        current_rate = rates[rate_idx]["rate"]
+
+                    monthly.append({"date": month_start, "rate": current_rate})
+
+            result = {
+                "current_rate": rates[-1]["rate"],
+                "current_date": rates[-1]["date"],
+                "history": monthly,
+                "changes": rates[-20:],  # Last 20 rate changes
+            }
+
+            BOE_RATE_CACHE["data"] = result
+            BOE_RATE_CACHE["fetched"] = now
+
+            return jsonify(result)
+        else:
+            return jsonify({"error": "No rate data parsed from BoE response"}), 502
+
+    except Exception as e:
+        # If live fetch fails, return hardcoded recent data as fallback
+        fallback = {
+            "current_rate": 4.5,
+            "current_date": "2025-02-06",
+            "history": [],
+            "changes": [],
+            "fallback": True,
+            "error": str(e),
+        }
+        return jsonify(fallback)
+
+
+@app.route("/api/tools/mortgage-scenarios", methods=["POST"])
+@require_auth
+def mortgage_scenarios():
+    """Calculate mortgage payment scenarios at different rates."""
+    data = request.get_json()
+    balance = data.get("balance", 0)
+    current_rate = data.get("current_rate", 5.0)
+    remaining_years = data.get("remaining_years", 20)
+    monthly_payment = data.get("monthly_payment", 0)
+    margin = data.get("tracker_margin", 0.5)
+
+    def calc_monthly_payment(principal, annual_rate, years):
+        if annual_rate <= 0 or years <= 0:
+            return principal / max(years * 12, 1)
+        r = annual_rate / 100 / 12
+        n = years * 12
+        return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
+
+    def calc_total_interest(principal, annual_rate, years):
+        mp = calc_monthly_payment(principal, annual_rate, years)
+        return (mp * years * 12) - principal
+
+    def calc_overpayment(principal, annual_rate, years, extra_monthly):
+        if annual_rate <= 0:
+            return {"months": int(principal / max(extra_monthly + principal / (years * 12), 1)), "interest": 0}
+        r = annual_rate / 100 / 12
+        balance = principal
+        base_payment = calc_monthly_payment(principal, annual_rate, years)
+        total_payment = base_payment + extra_monthly
+        months = 0
+        total_interest = 0
+        while balance > 0.01 and months < years * 12:
+            interest = balance * r
+            total_interest += interest
+            principal_paid = total_payment - interest
+            if principal_paid <= 0:
+                break
+            balance -= principal_paid
+            months += 1
+            if balance < 0:
+                balance = 0
+        return {"months": months, "total_interest": round(total_interest), "saved_months": remaining_years * 12 - months}
+
+    # Current scenario
+    current_monthly = calc_monthly_payment(balance, current_rate, remaining_years)
+
+    # Rate change scenarios
+    scenarios = []
+    for delta in [-1.5, -1.0, -0.5, 0, 0.5, 1.0, 1.5, 2.0]:
+        rate = current_rate + delta
+        if rate < 0.1:
+            continue
+        mp = calc_monthly_payment(balance, rate, remaining_years)
+        ti = calc_total_interest(balance, rate, remaining_years)
+        scenarios.append({
+            "rate": round(rate, 2),
+            "base_rate": round(rate - margin, 2),
+            "monthly_payment": round(mp),
+            "total_interest": round(ti),
+            "diff_monthly": round(mp - current_monthly),
+            "is_current": delta == 0,
+        })
+
+    # Overpayment scenarios
+    overpayments = []
+    for extra in [0, 100, 200, 300, 500]:
+        result = calc_overpayment(balance, current_rate, remaining_years, extra)
+        no_extra = calc_overpayment(balance, current_rate, remaining_years, 0)
+        overpayments.append({
+            "extra_monthly": extra,
+            "months_to_clear": result["months"],
+            "total_interest": result["total_interest"],
+            "interest_saved": no_extra["total_interest"] - result["total_interest"],
+            "time_saved_months": result["saved_months"] - no_extra["saved_months"] if extra > 0 else 0,
+        })
+
+    return jsonify({
+        "current": {
+            "rate": current_rate,
+            "base_rate": round(current_rate - margin, 2),
+            "monthly_payment": round(current_monthly),
+            "total_interest": round(calc_total_interest(balance, current_rate, remaining_years)),
+            "balance": balance,
+            "remaining_years": remaining_years,
+        },
+        "scenarios": scenarios,
+        "overpayments": overpayments,
+    })
+
+
 # ── Serve React SPA ───────────────────────────────────────────────────────────
 
 @app.route("/", defaults={"path": ""})

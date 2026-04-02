@@ -549,7 +549,7 @@ export default function App() {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
-          {[["overview", "Overview"], ["accounts", "Accounts"], ["projections", "Projections"], ["advisor", "Advisor"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
+          {[["overview", "Overview"], ["accounts", "Accounts"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
             <Tab key={id} label={l} active={tab === id} onClick={() => setTab(id)} />
           ))}
         </div>
@@ -714,6 +714,11 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ── RATES & MORTGAGE ───────────────────────────────── */}
+        {tab === "rates" && (
+          <RatesMortgageTab accounts={accounts} />
         )}
 
         {/* ── TOOLS ────────────────────────────────────────────── */}
@@ -1087,6 +1092,308 @@ function AICopilotTab() {
 
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.blue}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 11.5, color: T.textMuted, lineHeight: 1.6 }}>
         <strong style={{ color: T.blue }}>Privacy note:</strong> Only a numerical summary of your accounts is sent to the Claude API — no names, addresses, or identifying information. All data is processed on your server. The AI analysis is general commentary, not regulated financial advice.
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RATES & MORTGAGE TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function RatesMortgageTab({ accounts }) {
+  const [rateData, setRateData] = useState(null);
+  const [scenarios, setScenarios] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [chartRange, setChartRange] = useState("10y");
+
+  const mortgage = accounts.find(a => a.type === "MORTGAGE") || null;
+  const [margin, setMargin] = useState(0.5);
+  const [remainingYears, setRemainingYears] = useState(20);
+
+  // Derive remaining years from term_end_date if available
+  useEffect(() => {
+    if (mortgage?.term_end_date) {
+      const end = new Date(mortgage.term_end_date);
+      const now = new Date();
+      const yrs = Math.max(1, Math.round((end - now) / (365.25 * 24 * 60 * 60 * 1000)));
+      setRemainingYears(yrs);
+    }
+  }, [mortgage]);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await api.boeBaseRate();
+        setRateData(data);
+      } catch (e) {
+        console.error("Failed to fetch rate data", e);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Fetch scenarios when mortgage data is available
+  useEffect(() => {
+    if (mortgage && rateData) {
+      fetchScenarios();
+    }
+  }, [mortgage, rateData, margin, remainingYears]);
+
+  const fetchScenarios = async () => {
+    if (!mortgage) return;
+    setScenarioLoading(true);
+    try {
+      const res = await api.mortgageScenarios({
+        balance: Math.abs(mortgage.balance),
+        current_rate: mortgage.interest_rate || (rateData?.current_rate || 4.5) + margin,
+        remaining_years: remainingYears,
+        monthly_payment: Math.abs(mortgage.monthly_contrib || 0),
+        tracker_margin: margin,
+      });
+      setScenarios(res);
+    } catch (e) {
+      console.error(e);
+    }
+    setScenarioLoading(false);
+  };
+
+  // Filter chart data by range
+  const filteredHistory = useMemo(() => {
+    if (!rateData?.history?.length) return [];
+    const now = new Date();
+    const ranges = {
+      "5y": 5, "10y": 10, "15y": 15, "all": 100,
+    };
+    const years = ranges[chartRange] || 10;
+    const cutoff = new Date(now.getFullYear() - years, now.getMonth(), 1).toISOString().slice(0, 10);
+    return rateData.history.filter(h => h.date >= cutoff);
+  }, [rateData, chartRange]);
+
+  // Add tracker rate line to chart data
+  const chartData = useMemo(() => {
+    return filteredHistory.map(h => ({
+      ...h,
+      tracker: +(h.rate + margin).toFixed(2),
+    }));
+  }, [filteredHistory, margin]);
+
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: "center", color: T.textDim, fontSize: 13 }}>Loading BoE rate data...</div>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Current Rate Banner */}
+      {rateData && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 170px", padding: "14px 16px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>BoE Base Rate</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: T.accent, fontFamily: T.mono }}>{rateData.current_rate}%</div>
+            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Since {rateData.current_date}</div>
+          </div>
+          {mortgage && (
+            <>
+              <div style={{ flex: "1 1 170px", padding: "14px 16px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>Your Tracker Rate</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: T.blue, fontFamily: T.mono }}>{mortgage.interest_rate}%</div>
+                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>BBR + {margin}%</div>
+              </div>
+              <div style={{ flex: "1 1 170px", padding: "14px 16px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>Monthly Payment</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: T.text, fontFamily: T.mono }}>{fmtFull(Math.abs(mortgage.monthly_contrib || 0))}</div>
+                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Balance: {fmtFull(Math.abs(mortgage.balance))}</div>
+              </div>
+              <div style={{ flex: "1 1 170px", padding: "14px 16px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>Remaining Term</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: T.amber, fontFamily: T.mono }}>{remainingYears}y</div>
+                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{mortgage.term_end_date || "—"}</div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Base Rate History Chart */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>BoE Base Rate History</h3>
+            <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>
+              {mortgage ? "Your tracker rate (BBR + margin) shown in blue" : "Official Bank Rate over time"}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 3 }}>
+            {["5y", "10y", "15y", "all"].map(r => (
+              <button key={r} onClick={() => setChartRange(r)} style={{
+                background: chartRange === r ? T.surfaceHover : "transparent",
+                color: chartRange === r ? T.accent : T.textDim,
+                border: `1px solid ${chartRange === r ? T.border : "transparent"}`,
+                borderRadius: 4, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontWeight: 500,
+              }}>{r.toUpperCase()}</button>
+            ))}
+          </div>
+        </div>
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="brGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={T.accent} stopOpacity={0.2} />
+                  <stop offset="100%" stopColor={T.accent} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => v.slice(0, 7)} interval={Math.max(1, Math.floor(chartData.length / 12))} />
+              <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => `${v}%`} domain={[0, "auto"]} />
+              <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={v => `${v}%`} />
+              <Area type="stepAfter" dataKey="rate" name="Base Rate" stroke={T.accent} fill="url(#brGrad)" strokeWidth={2} />
+              {mortgage && (
+                <Area type="stepAfter" dataKey="tracker" name="Your Tracker" stroke={T.blue} fill="none" strokeWidth={2} strokeDasharray="6 3" />
+              )}
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ padding: 40, textAlign: "center", color: T.textDim, fontSize: 13 }}>
+            {rateData?.fallback ? "Could not fetch live data from BoE. Check your network configuration." : "No historical data available."}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Rate Changes */}
+      {rateData?.changes?.length > 0 && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 12px" }}>Recent Rate Decisions</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {rateData.changes.slice().reverse().map((c, i, arr) => {
+              const prev = i < arr.length - 1 ? arr[i + 1].rate : c.rate;
+              const diff = c.rate - prev;
+              const color = diff > 0 ? T.red : diff < 0 ? T.green : T.textDim;
+              const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "—";
+              return (
+                <div key={c.date} style={{
+                  padding: "6px 10px", background: T.bg, borderRadius: 4, border: `1px solid ${T.border}`,
+                  fontSize: 11, display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <span style={{ color: T.textDim }}>{c.date.slice(0, 7)}</span>
+                  <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{c.rate}%</span>
+                  <span style={{ color, fontWeight: 600 }}>{arrow}{diff !== 0 ? ` ${Math.abs(diff).toFixed(2)}` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Mortgage config */}
+      {mortgage && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 12px" }}>Mortgage Configuration</h3>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Field label="Tracker Margin (above BBR)" type="number" value={margin} onChange={v => setMargin(v)} suffix="%" small />
+            <Field label="Remaining Years" type="number" value={remainingYears} onChange={v => setRemainingYears(v)} small />
+          </div>
+        </div>
+      )}
+
+      {/* Rate Scenarios */}
+      {scenarios && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Rate Change Scenarios</h3>
+          <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
+            How your monthly payment changes if the base rate moves
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${T.border}` }}>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>BASE RATE</th>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>YOUR RATE</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>MONTHLY</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>DIFFERENCE</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TOTAL INTEREST</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarios.scenarios.map((s, i) => (
+                  <tr key={i} style={{
+                    borderBottom: `1px solid ${T.border}`,
+                    background: s.is_current ? T.accent + "11" : "transparent",
+                  }}>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, fontWeight: s.is_current ? 700 : 400, color: s.is_current ? T.accent : T.text }}>
+                      {s.base_rate}%{s.is_current ? " ◄" : ""}
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono }}>{s.rate}%</td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right" }}>{fmtFull(s.monthly_payment)}</td>
+                    <td style={{
+                      padding: "8px 10px", fontFamily: T.mono, textAlign: "right",
+                      color: s.diff_monthly > 0 ? T.red : s.diff_monthly < 0 ? T.green : T.textDim,
+                    }}>
+                      {s.diff_monthly > 0 ? "+" : ""}{s.diff_monthly !== 0 ? fmtFull(s.diff_monthly) : "—"}
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right", color: T.textMuted }}>{fmtFull(s.total_interest)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Overpayment Scenarios */}
+      {scenarios?.overpayments && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Overpayment Scenarios</h3>
+          <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
+            How much you save by overpaying each month at your current rate ({scenarios.current.rate}%)
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${T.border}` }}>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>EXTRA/MONTH</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>PAID OFF IN</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TOTAL INTEREST</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>INTEREST SAVED</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TIME SAVED</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarios.overpayments.map((o, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, fontWeight: i === 0 ? 400 : 600, color: i === 0 ? T.textDim : T.text }}>
+                      {i === 0 ? "No overpayment" : fmtFull(o.extra_monthly)}
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right" }}>
+                      {Math.floor(o.months_to_clear / 12)}y {o.months_to_clear % 12}m
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right", color: T.textMuted }}>{fmtFull(o.total_interest)}</td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right", color: o.interest_saved > 0 ? T.green : T.textDim }}>
+                      {o.interest_saved > 0 ? fmtFull(o.interest_saved) : "—"}
+                    </td>
+                    <td style={{ padding: "8px 10px", fontFamily: T.mono, textAlign: "right", color: o.time_saved_months > 0 ? T.green : T.textDim }}>
+                      {o.time_saved_months > 0 ? `${Math.floor(Math.abs(o.time_saved_months) / 12)}y ${Math.abs(o.time_saved_months) % 12}m` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!mortgage && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "14px 18px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+          <strong style={{ color: T.amber }}>No mortgage found.</strong> Add a mortgage account in the Accounts tab to unlock rate change scenarios and overpayment modelling.
+        </div>
+      )}
+
+      <div style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
+        Base rate data sourced from the Bank of England Statistical Interactive Database (IUDBEDR series). Cached for 24 hours.
+        Scenario calculations use standard annuity formulae and do not account for product fees, ERCs, or lender-specific terms.
       </div>
     </div>
   );

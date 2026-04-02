@@ -96,4 +96,8 @@ export const api = {
   // Tools
   salarySacrifice: (data) => apiFetch("/tools/salary-sacrifice", { method: "POST", body: JSON.stringify(data) }),
   debtPayoff: (data) => apiFetch("/tools/debt-payoff", { method: "POST", body: JSON.stringify(data) }),
+
+  // Rates & Mortgage
+  boeBaseRate: () => apiFetch("/rates/boe-base-rate"),
+  mortgageScenarios: (data) => apiFetch("/tools/mortgage-scenarios", { method: "POST", body: JSON.stringify(data) }),
 };
