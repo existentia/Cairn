@@ -14,7 +14,7 @@ from pathlib import Path
 
 DB_PATH = Path("/app/data/cairn.db")
 
-ASSET_TYPES = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS"}
+ASSET_TYPES = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
 LIABILITY_TYPES = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
 
 

@@ -6,8 +6,9 @@ echo "▲ Cairn — Starting up..."
 # Initialise database
 python -c "
 import sys; sys.path.insert(0, '/app')
-from backend.app import init_db
+from backend.app import init_db, ensure_password_hash
 init_db()
+ensure_password_hash()
 print('Database initialised.')
 "
 

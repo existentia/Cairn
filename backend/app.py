@@ -120,6 +120,12 @@ def init_db():
 
         -- Clean expired tokens on init
         DELETE FROM auth_tokens WHERE expires_at < datetime('now');
+
+        CREATE TABLE IF NOT EXISTS auth (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            password_hash TEXT NOT NULL DEFAULT ''
+        );
+        INSERT OR IGNORE INTO auth (id, password_hash) VALUES (1, '');
     """)
     db.commit()
 
@@ -134,6 +140,20 @@ def init_db():
         if col_name not in existing_cols:
             db.execute(f"ALTER TABLE settings ADD COLUMN {col_name} {col_def}")
     db.commit()
+    db.close()
+
+
+def ensure_password_hash():
+    """Hash ADMIN_PASSWORD and store it, or update the hash if the password changed."""
+    db = sqlite3.connect(str(DB_PATH))
+    db.row_factory = sqlite3.Row
+    row = db.execute("SELECT password_hash FROM auth WHERE id = 1").fetchone()
+    if not row or not row["password_hash"] or not check_password_hash(row["password_hash"], ADMIN_PASSWORD):
+        db.execute(
+            "INSERT OR REPLACE INTO auth (id, password_hash) VALUES (1, ?)",
+            (generate_password_hash(ADMIN_PASSWORD),)
+        )
+        db.commit()
     db.close()
 
 
@@ -163,9 +183,10 @@ def login():
     data = request.get_json()
     username = data.get("username", "")
     password = data.get("password", "")
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+    db = get_db()
+    auth_row = db.execute("SELECT password_hash FROM auth WHERE id = 1").fetchone()
+    if username == ADMIN_USERNAME and auth_row and check_password_hash(auth_row["password_hash"], password):
         token = secrets.token_hex(32)
-        db = get_db()
         # Clean up expired tokens
         db.execute("DELETE FROM auth_tokens WHERE expires_at < datetime('now')")
         # Insert new token (7-day expiry)
@@ -311,7 +332,7 @@ def create_snapshot():
     db = get_db()
     accounts = db.execute("SELECT * FROM accounts").fetchall()
 
-    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS"}
+    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
     liability_types = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
 
     total_assets = sum(a["balance"] for a in accounts if a["type"] in asset_types)
@@ -480,7 +501,7 @@ def ai_commentary():
     ).fetchall()]
 
     # Build a sanitised summary for Claude (no names, just financial data)
-    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS"}
+    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
     liability_types = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
     total_assets = sum(a["balance"] for a in accounts if a["type"] in asset_types)
     total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in liability_types)
@@ -889,6 +910,7 @@ def boe_base_rate():
             {"date": "2023-05-11", "rate": 4.50}, {"date": "2023-06-22", "rate": 5.00},
             {"date": "2023-08-03", "rate": 5.25}, {"date": "2024-08-01", "rate": 5.00},
             {"date": "2024-11-07", "rate": 4.75}, {"date": "2025-02-06", "rate": 4.50},
+            {"date": "2025-03-20", "rate": 4.25}, {"date": "2025-05-08", "rate": 4.00},
         ]
 
         # Build monthly from fallback
@@ -1027,6 +1049,7 @@ def serve_spa(path):
 
 if __name__ == "__main__":
     init_db()
+    ensure_password_hash()
     port = int(os.environ.get("PORT", 8000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
 

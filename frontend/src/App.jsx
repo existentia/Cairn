@@ -36,6 +36,7 @@ const T = {
 const ACCOUNT_LABELS = {
   PENSION_DC: "DC Pension", SIPP: "SIPP", ISA_SS: "Stocks & Shares ISA",
   ISA_CASH: "Cash ISA", CURRENT: "Current Account", SAVINGS: "Savings Account",
+  PROPERTY: "Property",
   MORTGAGE: "Mortgage", CREDIT_CARD: "Credit Card", LOAN: "Loan",
 };
 
@@ -279,7 +280,7 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete }) {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             <Field label="Name" value={form.name} onChange={(v) => upd("name", v)} />
             <Field label="Provider" value={form.provider || ""} onChange={(v) => upd("provider", v)} />
-            <Field label="Balance" type="number" value={form.balance} onChange={(v) => upd("balance", v)} prefix="£" />
+            <Field label={form.type === "PROPERTY" ? "Estimated Value" : "Balance"} type="number" value={form.balance} onChange={(v) => upd("balance", v)} prefix="£" />
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             {(form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "SAVINGS") && (
@@ -357,6 +358,8 @@ export default function App() {
   const [editId, setEditId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [accountTypeFilter, setAccountTypeFilter] = useState("all");
   const { addToast, ToastContainer } = useToast();
 
   // Check auth on mount
@@ -617,35 +620,79 @@ export default function App() {
         )}
 
         {/* ── ACCOUNTS ─────────────────────────────────────────── */}
-        {tab === "accounts" && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Accounts</h3>
-              <Btn onClick={() => setShowAdd(!showAdd)}>{showAdd ? "Cancel" : "+ Add Account"}</Btn>
+        {tab === "accounts" && (() => {
+          const q = accountSearch.toLowerCase();
+          const filteredAssets = assets.filter((a) =>
+            (accountTypeFilter === "all" || accountTypeFilter === "assets") &&
+            (a.name.toLowerCase().includes(q) || (a.provider || "").toLowerCase().includes(q) || ACCOUNT_LABELS[a.type]?.toLowerCase().includes(q))
+          );
+          const filteredLiabilities = liabilities.filter((a) =>
+            (accountTypeFilter === "all" || accountTypeFilter === "liabilities") &&
+            (a.name.toLowerCase().includes(q) || (a.provider || "").toLowerCase().includes(q) || ACCOUNT_LABELS[a.type]?.toLowerCase().includes(q))
+          );
+          const totalShown = filteredAssets.length + filteredLiabilities.length;
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Accounts</h3>
+                <Btn onClick={() => setShowAdd(!showAdd)}>{showAdd ? "Cancel" : "+ Add Account"}</Btn>
+              </div>
+
+              {/* Search & filter bar */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, flex: "1 1 180px", minWidth: 160 }}>
+                  <span style={{ padding: "0 8px", color: T.textDim, fontSize: 13 }}>⌕</span>
+                  <input
+                    value={accountSearch}
+                    onChange={(e) => setAccountSearch(e.target.value)}
+                    placeholder="Search accounts…"
+                    style={{ flex: 1, background: "transparent", border: "none", color: T.text, padding: "7px 8px 7px 0", fontSize: 13, outline: "none", fontFamily: T.font }}
+                  />
+                  {accountSearch && (
+                    <button onClick={() => setAccountSearch("")} style={{ background: "none", border: "none", color: T.textDim, cursor: "pointer", padding: "0 8px", fontSize: 13 }}>✕</button>
+                  )}
+                </div>
+                {["all", "assets", "liabilities"].map((f) => (
+                  <button key={f} onClick={() => setAccountTypeFilter(f)} style={{
+                    background: accountTypeFilter === f ? T.surface : "transparent",
+                    color: accountTypeFilter === f ? T.accent : T.textMuted,
+                    border: `1px solid ${accountTypeFilter === f ? T.border : "transparent"}`,
+                    borderRadius: 6, padding: "7px 13px", fontSize: 12.5, cursor: "pointer", fontWeight: accountTypeFilter === f ? 600 : 400,
+                    textTransform: "capitalize",
+                  }}>{f}</button>
+                ))}
+              </div>
+
+              {showAdd && <AccountForm onSave={addAccount} onCancel={() => setShowAdd(false)} />}
+
+              {filteredAssets.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <h4 style={{ fontSize: 12, color: T.green, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Assets</h4>
+                  {filteredAssets.map((a) => (
+                    <AccountRow key={a.id} account={a} editing={editId === a.id}
+                      onToggle={() => setEditId(editId === a.id ? null : a.id)}
+                      onSave={saveAccount} onDelete={() => removeAccount(a.id)} />
+                  ))}
+                </div>
+              )}
+              {filteredLiabilities.length > 0 && (
+                <div>
+                  <h4 style={{ fontSize: 12, color: T.red, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Liabilities</h4>
+                  {filteredLiabilities.map((a) => (
+                    <AccountRow key={a.id} account={a} editing={editId === a.id}
+                      onToggle={() => setEditId(editId === a.id ? null : a.id)}
+                      onSave={saveAccount} onDelete={() => removeAccount(a.id)} />
+                  ))}
+                </div>
+              )}
+              {totalShown === 0 && (accountSearch || accountTypeFilter !== "all") && (
+                <div style={{ padding: 32, textAlign: "center", color: T.textDim, fontSize: 13 }}>
+                  No accounts match your search.
+                </div>
+              )}
             </div>
-            {showAdd && <AccountForm onSave={addAccount} onCancel={() => setShowAdd(false)} />}
-            {assets.length > 0 && (
-              <div style={{ marginBottom: 18 }}>
-                <h4 style={{ fontSize: 12, color: T.green, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Assets</h4>
-                {assets.map((a) => (
-                  <AccountRow key={a.id} account={a} editing={editId === a.id}
-                    onToggle={() => setEditId(editId === a.id ? null : a.id)}
-                    onSave={saveAccount} onDelete={() => removeAccount(a.id)} />
-                ))}
-              </div>
-            )}
-            {liabilities.length > 0 && (
-              <div>
-                <h4 style={{ fontSize: 12, color: T.red, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Liabilities</h4>
-                {liabilities.map((a) => (
-                  <AccountRow key={a.id} account={a} editing={editId === a.id}
-                    onToggle={() => setEditId(editId === a.id ? null : a.id)}
-                    onSave={saveAccount} onDelete={() => removeAccount(a.id)} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── PROJECTIONS ──────────────────────────────────────── */}
         {tab === "projections" && (

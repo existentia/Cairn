@@ -3,7 +3,7 @@
  * Rule-based analysis, not regulated advice.
  */
 
-const ASSET_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS"]);
+const ASSET_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"]);
 const LIABILITY_TYPES = new Set(["MORTGAGE", "CREDIT_CARD", "LOAN"]);
 
 const fmtFull = (v) =>
@@ -156,6 +156,28 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
       });
     }
   });
+
+  // ── Property equity ─────────────────────────────────────────────
+  const properties = accounts.filter((a) => a.type === "PROPERTY");
+  if (properties.length > 0) {
+    const totalPropertyValue = properties.reduce((s, a) => s + a.balance, 0);
+    const mortgages = accounts.filter((a) => a.type === "MORTGAGE");
+    const totalMortgageBalance = mortgages.reduce((s, a) => s + Math.abs(a.balance), 0);
+    const equity = totalPropertyValue - totalMortgageBalance;
+    const ltv = totalPropertyValue > 0 ? (totalMortgageBalance / totalPropertyValue) * 100 : 0;
+    if (totalMortgageBalance > 0) {
+      const ltvBand = ltv <= 60 ? "≤60% LTV — you likely qualify for the best remortgage rates"
+        : ltv <= 75 ? "≤75% LTV — good access to competitive rates"
+        : ltv <= 85 ? "≤85% LTV — wider product range available as equity grows"
+        : "above 85% LTV — equity growth will unlock better rates over time";
+      insights.push({
+        type: ltv > 90 ? "info" : "good",
+        title: "Property Equity",
+        detail: `Property value ${fmtFull(totalPropertyValue)} vs mortgage ${fmtFull(totalMortgageBalance)} = ${fmtFull(equity)} equity (${Math.round(100 - ltv)}% owned, ${Math.round(ltv)}% LTV). ${ltvBand}.`,
+        priority: 4,
+      });
+    }
+  }
 
   // ── Deferred pensions ────────────────────────────────────────────
   accounts.filter((a) => (a.type === "PENSION_DC" || a.type === "SIPP") && !a.contributing && a.balance > 10000).forEach((p) => {
