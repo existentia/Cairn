@@ -269,22 +269,24 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
 
   return (
     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, marginBottom: 6, overflow: "hidden" }}>
-      <div onClick={onToggle} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", cursor: "pointer" }}>
-        <div>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "center", padding: "11px 16px", cursor: "pointer", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 500 }}>{account.name}</div>
           <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[account.type]} · {account.provider || "—"}</div>
         </div>
-        {(onMoveUp || onMoveDown) && (
-          <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 2, margin: "0 8px" }} onClick={(e) => e.stopPropagation()}>
-            <button style={reorderBtnStyle(!onMoveUp)} onClick={() => onMoveUp && onMoveUp()} disabled={!onMoveUp}>▲</button>
-            <button style={reorderBtnStyle(!onMoveDown)} onClick={() => onMoveDown && onMoveDown()} disabled={!onMoveDown}>▼</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {(onMoveUp || onMoveDown) && (
+            <div style={{ display: "flex", gap: 2 }} onClick={(e) => e.stopPropagation()}>
+              <button style={reorderBtnStyle(!onMoveUp)} onClick={() => onMoveUp && onMoveUp()} disabled={!onMoveUp}>▲</button>
+              <button style={reorderBtnStyle(!onMoveDown)} onClick={() => onMoveDown && onMoveDown()} disabled={!onMoveDown}>▼</button>
+            </div>
+          )}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: isLiab ? T.red : T.green, fontFamily: T.mono }}>
+              {isLiab ? "-" : ""}{fmtFull(display)}
+            </div>
+            {account.interest_rate > 0 && <div style={{ fontSize: 10.5, color: T.textDim }}>{account.interest_rate}% {account.rate_type || "APR"}</div>}
           </div>
-        )}
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: isLiab ? T.red : T.green, fontFamily: T.mono }}>
-            {isLiab ? "-" : ""}{fmtFull(display)}
-          </div>
-          {account.interest_rate > 0 && <div style={{ fontSize: 10.5, color: T.textDim }}>{account.interest_rate}% {account.rate_type || "APR"}</div>}
         </div>
       </div>
       {editing && (
