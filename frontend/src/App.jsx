@@ -275,7 +275,7 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
           <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[account.type]} · {account.provider || "—"}</div>
         </div>
         {(onMoveUp || onMoveDown) && (
-          <div style={{ display: "flex", flexDirection: "column", margin: "0 8px" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 2, margin: "0 8px" }} onClick={(e) => e.stopPropagation()}>
             <button style={reorderBtnStyle(!onMoveUp)} onClick={() => onMoveUp && onMoveUp()} disabled={!onMoveUp}>▲</button>
             <button style={reorderBtnStyle(!onMoveDown)} onClick={() => onMoveDown && onMoveDown()} disabled={!onMoveDown}>▼</button>
           </div>
