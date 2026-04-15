@@ -63,6 +63,7 @@ def init_db():
             pension_contrib_pct REAL NOT NULL DEFAULT 0,
             employer_contrib_pct REAL NOT NULL DEFAULT 0,
             tax_code TEXT NOT NULL DEFAULT '1257L',
+            state_pension_annual REAL NOT NULL DEFAULT 11500,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -104,6 +105,8 @@ def init_db():
             tax_year TEXT NOT NULL DEFAULT '2025/26',
             tracker_margin REAL NOT NULL DEFAULT 0.5,
             mortgage_remaining_years INTEGER NOT NULL DEFAULT 20,
+            net_worth_target REAL NOT NULL DEFAULT 0,
+            net_worth_target_date TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -135,10 +138,22 @@ def init_db():
     migrations = [
         ("tracker_margin", "REAL NOT NULL DEFAULT 0.5"),
         ("mortgage_remaining_years", "INTEGER NOT NULL DEFAULT 20"),
+        ("net_worth_target", "REAL NOT NULL DEFAULT 0"),
+        ("net_worth_target_date", "TEXT NOT NULL DEFAULT ''"),
     ]
     for col_name, col_def in migrations:
         if col_name not in existing_cols:
             db.execute(f"ALTER TABLE settings ADD COLUMN {col_name} {col_def}")
+
+    # Profile migrations
+    cursor = db.execute("PRAGMA table_info(profile)")
+    profile_cols = {row[1] for row in cursor.fetchall()}
+    profile_migrations = [
+        ("state_pension_annual", "REAL NOT NULL DEFAULT 11500"),
+    ]
+    for col_name, col_def in profile_migrations:
+        if col_name not in profile_cols:
+            db.execute(f"ALTER TABLE profile ADD COLUMN {col_name} {col_def}")
     db.commit()
     db.close()
 
@@ -234,6 +249,7 @@ def update_profile():
         UPDATE profile SET
             name = ?, dob = ?, retirement_age = ?, gross_salary = ?,
             pension_contrib_pct = ?, employer_contrib_pct = ?, tax_code = ?,
+            state_pension_annual = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
@@ -241,6 +257,7 @@ def update_profile():
         data.get("retirement_age", 57), data.get("gross_salary", 0),
         data.get("pension_contrib_pct", 0), data.get("employer_contrib_pct", 0),
         data.get("tax_code", "1257L"),
+        data.get("state_pension_annual", 11500),
     ))
     db.commit()
     return jsonify({"ok": True})
@@ -353,6 +370,37 @@ def create_snapshot():
     return jsonify({"date": snapshot_date, "net_worth": net_worth}), 201
 
 
+@app.route("/api/snapshots/<int:snapshot_id>", methods=["PUT"])
+@require_auth
+def update_snapshot(snapshot_id):
+    """Edit a snapshot's date or values."""
+    data = request.get_json()
+    db = get_db()
+    fields = []
+    values = []
+    allowed = ["date", "net_worth", "total_assets", "total_liabilities"]
+    for key in allowed:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+    if not fields:
+        return jsonify({"error": "No fields to update"}), 400
+    values.append(snapshot_id)
+    db.execute(f"UPDATE snapshots SET {', '.join(fields)} WHERE id = ?", values)
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/snapshots/<int:snapshot_id>", methods=["DELETE"])
+@require_auth
+def delete_snapshot(snapshot_id):
+    """Delete a specific snapshot."""
+    db = get_db()
+    db.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/settings", methods=["GET"])
@@ -373,6 +421,7 @@ def update_settings():
             growth_rate = ?, inflation_rate = ?, isa_allowance = ?,
             pension_annual_allowance = ?, tax_year = ?,
             tracker_margin = ?, mortgage_remaining_years = ?,
+            net_worth_target = ?, net_worth_target_date = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
@@ -380,6 +429,7 @@ def update_settings():
         data.get("isa_allowance", 20000), data.get("pension_annual_allowance", 60000),
         data.get("tax_year", "2025/26"),
         data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
+        data.get("net_worth_target", 0), data.get("net_worth_target_date", ""),
     ))
     db.commit()
     return jsonify({"ok": True})

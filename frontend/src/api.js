@@ -81,6 +81,8 @@ export const api = {
   // Snapshots
   getSnapshots: (limit) => apiFetch(`/snapshots${limit ? `?limit=${limit}` : ""}`),
   takeSnapshot: (date) => apiFetch("/snapshots", { method: "POST", body: JSON.stringify({ date }) }),
+  updateSnapshot: (id, data) => apiFetch(`/snapshots/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSnapshot: (id) => apiFetch(`/snapshots/${id}`, { method: "DELETE" }),
 
   // Settings
   getSettings: () => apiFetch("/settings"),

@@ -207,9 +207,10 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
 
     if (profile.retirement_age < 67) {
       const gapYears = 67 - profile.retirement_age;
+      const spAnnual = profile.state_pension_annual || 11500;
       insights.push({
         type: "info", title: "State Pension Gap",
-        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (67). You'll need ~${fmtFull(11500 * gapYears)} to bridge that gap (£11,500/year). Factor this into drawdown planning.`,
+        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (67). You'll need ~${fmtFull(Math.round(spAnnual * gapYears))} to bridge that gap (${fmtFull(spAnnual)}/year). Factor this into drawdown planning.`,
         priority: 2,
       });
     }

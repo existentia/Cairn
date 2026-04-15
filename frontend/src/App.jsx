@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 import { api } from "./api.js";
 import { generateInsights, ASSET_TYPES, LIABILITY_TYPES, fmtFull, ageFromDob } from "./advisor.js";
@@ -462,6 +462,26 @@ export default function App() {
     }
   };
 
+  const updateSnapshot = async (id, updates) => {
+    try {
+      await api.updateSnapshot(id, updates);
+      await loadData();
+      addToast("Snapshot updated", "success");
+    } catch (e) {
+      addToast("Failed to update snapshot", "error");
+    }
+  };
+
+  const deleteSnapshot = async (id) => {
+    try {
+      await api.deleteSnapshot(id);
+      await loadData();
+      addToast("Snapshot deleted", "success");
+    } catch (e) {
+      addToast("Failed to delete snapshot", "error");
+    }
+  };
+
   const exportData = async () => {
     try {
       const d = await api.exportData();
@@ -571,6 +591,15 @@ export default function App() {
                     <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
                     <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} />
                     <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
+                    {settings.net_worth_target > 0 && (
+                      <ReferenceLine
+                        y={settings.net_worth_target}
+                        stroke={T.amber}
+                        strokeDasharray="5 4"
+                        strokeWidth={1.5}
+                        label={{ value: `Target: ${fmt(settings.net_worth_target)}${settings.net_worth_target_date ? ` by ${settings.net_worth_target_date.slice(0, 7)}` : ""}`, fill: T.amber, fontSize: 10, position: "insideTopLeft" }}
+                      />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
@@ -726,7 +755,7 @@ export default function App() {
                   { label: "Projected pot at retirement", value: fmtFull(retirementPot), color: T.accent },
                   { label: "4% drawdown (annual)", value: fmtFull(Math.round(retirementPot * 0.04)), color: T.blue },
                   { label: "4% drawdown (monthly)", value: fmtFull(Math.round(retirementPot * 0.04 / 12)), color: T.green },
-                  { label: "State Pension (est.)", value: "~£11,500/yr", color: T.amber },
+                  { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || 11500)}/yr`, color: T.amber },
                 ].map((m, i) => (
                   <div key={i} style={{ flex: "1 1 170px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
                     <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
@@ -753,6 +782,7 @@ export default function App() {
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <ProfileSettings profile={profile} onSave={saveProfile} saving={saving} />
             <AssumptionSettings settings={settings} onSave={saveSettings} saving={saving} />
+            <SnapshotHistoryManager snapshots={snapshots} onUpdate={updateSnapshot} onDelete={deleteSnapshot} />
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Data Management</h3>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -810,6 +840,14 @@ function ProfileSettings({ profile, onSave, saving }) {
         <Field label="Employer %" type="number" value={form.employer_contrib_pct} onChange={(v) => upd("employer_contrib_pct", v)} suffix="%" small />
         <Field label="Tax Code" value={form.tax_code} onChange={(v) => upd("tax_code", v)} small />
       </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? 11500} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
+        <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
+          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+            Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default £11,500 is the full new State Pension (2025/26).
+          </span>
+        </div>
+      </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Btn onClick={() => onSave(form)}>{saving ? "Saving..." : "Save Profile"}</Btn>
       </div>
@@ -831,9 +869,109 @@ function AssumptionSettings({ settings, onSave, saving }) {
         <Field label="ISA Allowance" type="number" value={form.isa_allowance} onChange={(v) => upd("isa_allowance", v)} prefix="£" />
         <Field label="Pension Annual Allowance" type="number" value={form.pension_annual_allowance} onChange={(v) => upd("pension_annual_allowance", v)} prefix="£" />
       </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="Net Worth Target" type="number" value={form.net_worth_target ?? 0} onChange={(v) => upd("net_worth_target", v)} prefix="£" />
+        <Field label="Target Date" type="month" value={(form.net_worth_target_date || "").slice(0, 7)} onChange={(v) => upd("net_worth_target_date", v ? v + "-01" : "")} />
+        <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
+          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+            Sets a dashed target line on the net worth chart. Leave at 0 to hide.
+          </span>
+        </div>
+      </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Btn onClick={() => onSave(form)}>{saving ? "Saving..." : "Save Settings"}</Btn>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SNAPSHOT HISTORY MANAGER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+
+  const sorted = [...snapshots].sort((a, b) => b.date.localeCompare(a.date));
+
+  const startEdit = (snap) => {
+    setEditId(snap.id);
+    setEditForm({ date: snap.date, net_worth: snap.net_worth, total_assets: snap.total_assets, total_liabilities: snap.total_liabilities });
+  };
+
+  const cancelEdit = () => { setEditId(null); setEditForm({}); };
+
+  const saveEdit = () => {
+    onUpdate(editId, {
+      date: editForm.date,
+      net_worth: parseFloat(editForm.net_worth) || 0,
+      total_assets: parseFloat(editForm.total_assets) || 0,
+      total_liabilities: parseFloat(editForm.total_liabilities) || 0,
+    });
+    setEditId(null);
+    setEditForm({});
+  };
+
+  const upd = (k, v) => setEditForm((p) => ({ ...p, [k]: v }));
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: expanded ? 14 : 0 }}>
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Snapshot History</h3>
+          {!expanded && <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>{snapshots.length} snapshots recorded</div>}
+        </div>
+        <Btn variant="secondary" onClick={() => setExpanded(!expanded)} style={{ fontSize: 11 }}>
+          {expanded ? "Hide" : "Edit History"}
+        </Btn>
+      </div>
+
+      {expanded && (
+        snapshots.length === 0 ? (
+          <div style={{ padding: "20px 0", textAlign: "center", color: T.textDim, fontSize: 13 }}>No snapshots recorded yet.</div>
+        ) : (
+          <div>
+            {/* Header row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 4 }}>
+              {["Date", "Net Worth", "Assets", "Liabilities", ""].map((h, i) => (
+                <div key={i} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</div>
+              ))}
+            </div>
+
+            {sorted.map((snap) => (
+              <div key={snap.id}>
+                {editId === snap.id ? (
+                  <div style={{ background: T.bg, borderRadius: 6, padding: "10px 8px", marginBottom: 4, border: `1px solid ${T.borderLight}` }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <Field label="Date" type="date" value={editForm.date || ""} onChange={(v) => upd("date", v)} small />
+                      <Field label="Net Worth" type="number" value={editForm.net_worth ?? ""} onChange={(v) => upd("net_worth", v)} prefix="£" small />
+                      <Field label="Total Assets" type="number" value={editForm.total_assets ?? ""} onChange={(v) => upd("total_assets", v)} prefix="£" small />
+                      <Field label="Total Liabilities" type="number" value={editForm.total_liabilities ?? ""} onChange={(v) => upd("total_liabilities", v)} prefix="£" small />
+                    </div>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <Btn variant="secondary" onClick={cancelEdit}>Cancel</Btn>
+                      <Btn onClick={saveEdit}>Save</Btn>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, padding: "7px 8px", borderBottom: `1px solid ${T.border}22`, alignItems: "center" }}>
+                    <div style={{ fontSize: 12, fontFamily: T.mono }}>{snap.date}</div>
+                    <div style={{ fontSize: 12, fontFamily: T.mono, color: snap.net_worth >= 0 ? T.green : T.red, fontWeight: 600 }}>{fmtFull(snap.net_worth)}</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_assets || 0)}</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_liabilities || 0)}</div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={() => startEdit(snap)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "2px 8px", fontSize: 11 }}>Edit</button>
+                      <button onClick={() => onDelete(snap.id)} style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "2px 8px", fontSize: 11 }}>✕</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      )}
     </div>
   );
 }
