@@ -1027,7 +1027,7 @@ function DrawdownSimulator({ retirementPot, profile, settings }) {
           depletionAge
             ? { label: "Pot depletes at age", value: depletionAge, color: T.red, sub: `${depletionAge - profile.retirement_age} years of drawdown` }
             : { label: "Pot at age 100", value: fmtFull(lastBalance), color: T.green, sub: "Survives full retirement" },
-          { label: "Self-funded years (pre-SP)", value: spStartsAt ? `${67 - profile.retirement_age}y`, color: T.amber, sub: `Ages ${profile.retirement_age}–67` },
+          { label: "Self-funded years (pre-SP)", value: spStartsAt ? `${67 - profile.retirement_age}y` : "N/A", color: T.amber, sub: `Ages ${profile.retirement_age}–67` },
           { label: "Annual spend from pot (post-SP)", value: fmtFull(Math.max(0, monthlySpend * 12 - spAnnual)), color: T.blue, sub: `After ${fmtFull(spAnnual)}/yr State Pension` },
           { label: "Total monthly income at 67+", value: fmtFull(monthlySpend), color: T.accent, sub: `Pot + SP combined` },
         ].map((m, i) => (
