@@ -806,14 +806,7 @@ export default function App() {
         )}
 
         {/* ── ADVISOR ──────────────────────────────────────────── */}
-        {tab === "advisor" && (
-          <div>
-            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 4px" }}>Financial Insights</h3>
-            <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>Rule-based analysis · Not regulated financial advice</p>
-            {insights.map((ins, i) => <InsightCard key={i} insight={ins} />)}
-            {insights.length === 0 && <p style={{ color: T.textMuted, fontSize: 13, padding: 20 }}>Add accounts and profile info to generate insights.</p>}
-          </div>
-        )}
+        {tab === "advisor" && <AdvisorTab insights={insights} />}
 
         {/* ── SETTINGS ─────────────────────────────────────────── */}
         {tab === "settings" && (
@@ -1058,6 +1051,99 @@ function DrawdownSimulator({ retirementPot, profile, settings }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADVISOR TAB — filterable insights
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const TYPE_META = {
+  warning:     { label: "Warnings",     icon: "▲", color: () => T.red },
+  opportunity: { label: "Opportunities",icon: "◆", color: () => T.amber },
+  good:        { label: "Good",         icon: "●", color: () => T.green },
+  info:        { label: "Info",         icon: "■", color: () => T.blue },
+};
+
+const CAT_LABELS = {
+  isa: "ISA", pension: "Pensions", mortgage: "Mortgage",
+  debt: "Debt", savings: "Savings", retirement: "Retirement", general: "General",
+};
+
+function AdvisorTab({ insights }) {
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [catFilter, setCatFilter] = useState("all");
+
+  const countByType = (t) => insights.filter((i) => i.type === t).length;
+  const countByCat = (c) => insights.filter((i) => i.category === c).length;
+
+  const filtered = insights.filter((ins) =>
+    (typeFilter === "all" || ins.type === typeFilter) &&
+    (catFilter === "all" || ins.category === catFilter)
+  );
+
+  const activeCats = Object.keys(CAT_LABELS).filter((c) => countByCat(c) > 0);
+
+  const filterBtnStyle = (active, color) => ({
+    background: active ? T.surface : "transparent",
+    color: active ? (color || T.accent) : T.textMuted,
+    border: `1px solid ${active ? (color ? color + "66" : T.border) : "transparent"}`,
+    borderRadius: 6, padding: "5px 12px", fontSize: 12,
+    cursor: "pointer", fontWeight: active ? 600 : 400, transition: "all 0.1s",
+  });
+
+  const catBtnStyle = (active) => ({
+    background: active ? T.surfaceHover : "transparent",
+    color: active ? T.text : T.textDim,
+    border: `1px solid ${active ? T.borderLight : "transparent"}`,
+    borderRadius: 6, padding: "4px 10px", fontSize: 11.5,
+    cursor: "pointer", fontWeight: active ? 500 : 400,
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 3px" }}>Financial Insights</h3>
+          <p style={{ fontSize: 11.5, color: T.textDim, margin: 0 }}>Rule-based analysis · Not regulated financial advice</p>
+        </div>
+        <div style={{ fontSize: 11, color: T.textDim, paddingTop: 4 }}>
+          {filtered.length} of {insights.length} insight{insights.length !== 1 ? "s" : ""}
+        </div>
+      </div>
+
+      {/* Type filter */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+        <button style={filterBtnStyle(typeFilter === "all")} onClick={() => setTypeFilter("all")}>
+          All ({insights.length})
+        </button>
+        {Object.entries(TYPE_META).filter(([t]) => countByType(t) > 0).map(([t, meta]) => (
+          <button key={t} style={filterBtnStyle(typeFilter === t, meta.color())} onClick={() => setTypeFilter(typeFilter === t ? "all" : t)}>
+            {meta.icon} {meta.label} ({countByType(t)})
+          </button>
+        ))}
+      </div>
+
+      {/* Category filter */}
+      {activeCats.length > 1 && (
+        <div style={{ display: "flex", gap: 3, marginBottom: 16, flexWrap: "wrap" }}>
+          <button style={catBtnStyle(catFilter === "all")} onClick={() => setCatFilter("all")}>All topics</button>
+          {activeCats.map((c) => (
+            <button key={c} style={catBtnStyle(catFilter === c)} onClick={() => setCatFilter(catFilter === c ? "all" : c)}>
+              {CAT_LABELS[c]} ({countByCat(c)})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        insights.length === 0
+          ? <p style={{ color: T.textMuted, fontSize: 13, padding: 20 }}>Add accounts and profile info to generate insights.</p>
+          : <div style={{ padding: 32, textAlign: "center", color: T.textDim, fontSize: 13 }}>No insights match these filters.</div>
+      ) : (
+        filtered.map((ins, i) => <InsightCard key={i} insight={ins} />)
+      )}
     </div>
   );
 }
