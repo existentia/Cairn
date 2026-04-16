@@ -32,7 +32,7 @@ cp .env.example .env
 Edit `.env`:
 ```
 SECRET_KEY=some-random-string-at-least-32-chars
-ADMIN_USERNAME=neil
+ADMIN_USERNAME=username
 ADMIN_PASSWORD=your-secure-password
 ANTHROPIC_API_KEY=sk-ant-...   # Optional: enables AI Copilot
 ```

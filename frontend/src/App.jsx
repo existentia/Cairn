@@ -585,7 +585,15 @@ export default function App() {
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 22 }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: T.accent, letterSpacing: "-0.02em", margin: 0 }}>▲ Cairn</h1>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: T.accent, letterSpacing: "-0.02em", margin: 0, display: "flex", alignItems: "center", gap: 7 }}>
+              <svg width="16" height="20" viewBox="0 0 16 20" fill={T.accent} xmlns="http://www.w3.org/2000/svg">
+                <rect x="5.5" y="0"  width="5"  height="3.5" rx="0.75"/>
+                <rect x="3.5" y="5"  width="9"  height="3.5" rx="0.75"/>
+                <rect x="1.5" y="10" width="13" height="3.5" rx="0.75"/>
+                <rect x="0"   y="15" width="16" height="4"   rx="0.75"/>
+              </svg>
+              Cairn
+            </h1>
             <p style={{ fontSize: 12, color: T.textMuted, marginTop: 3 }}>
               {profile.name ? `${profile.name} · ` : ""}Age {age}{ytr > 0 ? ` · ${ytr}y to retirement` : ""}
             </p>
