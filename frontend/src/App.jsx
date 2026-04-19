@@ -300,6 +300,9 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
             {(form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "SAVINGS") && (
               <Field label="Monthly Contrib" type="number" value={form.monthly_contrib || 0} onChange={(v) => upd("monthly_contrib", v)} prefix="£" small />
             )}
+            {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
+              <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+            )}
             {isLiab && (
               <>
                 <Field label="Interest Rate" type="number" value={form.interest_rate || 0} onChange={(v) => upd("interest_rate", v)} suffix="%" small />
@@ -330,7 +333,7 @@ function AccountForm({ onSave, onCancel }) {
   const [form, setForm] = useState({
     name: "", type: "PENSION_DC", balance: 0, provider: "", contributing: false,
     monthly_contrib: 0, interest_rate: 0, rate_type: "", fixed_until: "",
-    term_end_date: "", notes: "",
+    term_end_date: "", notes: "", total_contributed: 0,
   });
   const isLiab = LIABILITY_TYPES.has(form.type);
   const upd = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -350,6 +353,9 @@ function AccountForm({ onSave, onCancel }) {
         <Field label="Monthly Contribution / Payment" type="number" value={Math.abs(form.monthly_contrib)}
           onChange={(v) => upd("monthly_contrib", isLiab ? -v : v)} prefix="£" small />
         {isLiab && <Field label="Interest Rate" type="number" value={form.interest_rate} onChange={(v) => upd("interest_rate", v)} suffix="%" small />}
+        {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
+          <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+        )}
       </div>
       <Field label="Notes" value={form.notes} onChange={(v) => upd("notes", v)} />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
@@ -688,6 +694,69 @@ export default function App() {
                 {insights.length === 0 && <div style={{ padding: 20, color: T.textDim, fontSize: 13 }}>Add accounts and profile info to generate insights.</div>}
               </div>
             </div>
+
+            {/* Portfolio Performance — only shown when ≥1 investment account has contributions tracked */}
+            {(() => {
+              const investTypes = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH"]);
+              const investAccounts = assets.filter((a) => investTypes.has(a.type) && (a.total_contributed || 0) > 0);
+              if (investAccounts.length === 0) return null;
+              return (
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Portfolio Performance</h3>
+                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>Contributions vs current value · Gain calculated as growth above total money invested</p>
+                  <div style={{ overflowX: "auto" }}>
+                    {/* Header */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "5px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 2 }}>
+                      {["Account", "Contributed", "Current Value", "Gain / Loss", "Return"].map((h, i) => (
+                        <div key={h} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: i > 0 ? "right" : "left" }}>{h}</div>
+                      ))}
+                    </div>
+                    {investAccounts.map((a) => {
+                      const gain = a.balance - (a.total_contributed || 0);
+                      const returnPct = a.total_contributed > 0 ? (gain / a.total_contributed) * 100 : 0;
+                      const gainColor = gain >= 0 ? T.green : T.red;
+                      return (
+                        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "7px 8px", borderBottom: `1px solid ${T.border}22`, alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 12.5, fontWeight: 500 }}>{a.name}</div>
+                            <div style={{ fontSize: 10.5, color: T.textDim }}>{ACCOUNT_LABELS[a.type]}{a.provider ? ` · ${a.provider}` : ""}</div>
+                          </div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", color: T.textMuted }}>{fmtFull(a.total_contributed)}</div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 600 }}>{fmtFull(a.balance)}</div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", color: gainColor, fontWeight: 600 }}>
+                            {gain >= 0 ? "+" : ""}{fmtFull(gain)}
+                          </div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", color: gainColor, fontWeight: 600 }}>
+                            {returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Totals row */}
+                    {(() => {
+                      const totalContrib = investAccounts.reduce((s, a) => s + (a.total_contributed || 0), 0);
+                      const totalValue = investAccounts.reduce((s, a) => s + a.balance, 0);
+                      const totalGain = totalValue - totalContrib;
+                      const totalReturn = totalContrib > 0 ? (totalGain / totalContrib) * 100 : 0;
+                      const gainColor = totalGain >= 0 ? T.green : T.red;
+                      return (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "8px 8px 2px", alignItems: "center", borderTop: `1px solid ${T.border}`, marginTop: 2 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Total</div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 600, color: T.textMuted }}>{fmtFull(totalContrib)}</div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 600 }}>{fmtFull(totalValue)}</div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 700, color: gainColor }}>
+                            {totalGain >= 0 ? "+" : ""}{fmtFull(totalGain)}
+                          </div>
+                          <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 700, color: gainColor }}>
+                            {totalReturn >= 0 ? "+" : ""}{totalReturn.toFixed(1)}%
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -917,6 +986,24 @@ function AssumptionSettings({ settings, onSave, saving }) {
           <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
             Sets a dashed target line on the net worth chart. Leave at 0 to hide.
           </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <div style={{ flex: "0 0 auto" }}>
+          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Tax Region</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[["scotland", "Scotland"], ["ruk", "England / Wales / NI"]].map(([val, lbl]) => (
+              <button key={val} onClick={() => upd("tax_region", val)} style={{
+                background: form.tax_region === val ? T.accent + "22" : "transparent",
+                color: form.tax_region === val ? T.accent : T.textMuted,
+                border: `1px solid ${form.tax_region === val ? T.accent + "66" : T.border}`,
+                borderRadius: 6, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: form.tax_region === val ? 600 : 400,
+              }}>{lbl}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 5 }}>
+            Used by the Salary Sacrifice tool and Advisor insights to apply the correct income tax bands.
+          </div>
         </div>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -1262,17 +1349,18 @@ function ToolsTab({ profile, accounts, settings }) {
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
-      {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} />}
+      {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>
   );
 }
 
-function SalarySacrificeTool({ profile }) {
+function SalarySacrificeTool({ profile, settings }) {
   const [currentPct, setCurrentPct] = useState(profile.pension_contrib_pct || 5);
   const [proposedPct, setProposedPct] = useState(Math.min((profile.pension_contrib_pct || 5) + 5, 40));
   const [employerPct, setEmployerPct] = useState(profile.employer_contrib_pct || 3);
   const [gross, setGross] = useState(profile.gross_salary || 50000);
+  const [taxRegion, setTaxRegion] = useState(settings?.tax_region || "scotland");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -1284,6 +1372,7 @@ function SalarySacrificeTool({ profile }) {
         current_contrib_pct: currentPct,
         proposed_contrib_pct: proposedPct,
         employer_contrib_pct: employerPct,
+        tax_region: taxRegion,
       });
       setResult(res);
     } catch (e) {
@@ -1293,6 +1382,8 @@ function SalarySacrificeTool({ profile }) {
   };
 
   useEffect(() => { calculate(); }, []);
+
+  const regionLabel = taxRegion === "scotland" ? "Scotland (2025/26)" : "England / Wales / NI (2025/26)";
 
   const StatRow = ({ label, current, proposed, highlight }) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>
@@ -1306,9 +1397,19 @@ function SalarySacrificeTool({ profile }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Salary Sacrifice Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
-          Uses Scottish income tax bands (2025/26). Shows the true cost of increasing pension contributions via salary sacrifice.
+        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px" }}>
+          Uses {regionLabel} income tax bands. Shows the true cost of increasing pension contributions via salary sacrifice.
         </p>
+        <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+          {[["scotland", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland"], ["ruk", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Eng / Wales / NI"]].map(([val, lbl]) => (
+            <button key={val} onClick={() => setTaxRegion(val)} style={{
+              background: taxRegion === val ? T.accent + "22" : "transparent",
+              color: taxRegion === val ? T.accent : T.textMuted,
+              border: `1px solid ${taxRegion === val ? T.accent + "66" : T.border}`,
+              borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: taxRegion === val ? 600 : 400,
+            }}>{lbl}</button>
+          ))}
+        </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <Field label="Gross Salary" type="number" value={gross} onChange={setGross} prefix="£" />
           <Field label="Current Contrib %" type="number" value={currentPct} onChange={setCurrentPct} suffix="%" small />

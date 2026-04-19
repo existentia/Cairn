@@ -147,16 +147,22 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
   }
 
   // ── Salary sacrifice opportunity ─────────────────────────────────
-  if (profile.gross_salary > 43662 && profile.pension_contrib_pct < 15) {
+  const taxRegion = settings.tax_region || "scotland";
+  const higherRateThreshold = taxRegion === "scotland" ? 43662 : 50270;
+  const higherRatePct = taxRegion === "scotland" ? 42 : 40;
+  const bandDesc = taxRegion === "scotland" ? "Scottish higher-rate band (42%)" : "higher-rate band (40%)";
+  if (profile.gross_salary > higherRateThreshold && profile.pension_contrib_pct < 15) {
     const currentSacrifice = profile.gross_salary * (profile.pension_contrib_pct / 100);
-    const toThreshold = profile.gross_salary - 43662 - currentSacrifice;
+    const toThreshold = profile.gross_salary - higherRateThreshold - currentSacrifice;
     if (toThreshold > 0) {
       const extraContrib = Math.min(toThreshold, 20000);
-      const totalSaved = extraContrib * 0.50;
+      // Combined saving: higher-rate income tax + employee NI (8% up to UEL)
+      const combinedSavingRate = (higherRatePct + 8) / 100;
+      const totalSaved = extraContrib * combinedSavingRate;
       const takeHomeReduction = extraContrib - totalSaved;
       insights.push({
         type: "opportunity", category: "pension", title: "Salary Sacrifice Optimisation",
-        detail: `You're in the Scottish higher-rate band (42%). An extra ${fmtFull(Math.round(extraContrib))}/year via salary sacrifice would cost only ${fmtFull(Math.round(takeHomeReduction))}/year in take-home (${fmtFull(Math.round(takeHomeReduction / 12))}/month) while adding ${fmtFull(Math.round(extraContrib))} to your pension. Use the Salary Sacrifice tool to model exact figures.`,
+        detail: `You're in the ${bandDesc}. An extra ${fmtFull(Math.round(extraContrib))}/year via salary sacrifice would cost only ${fmtFull(Math.round(takeHomeReduction))}/year in take-home (${fmtFull(Math.round(takeHomeReduction / 12))}/month) while adding ${fmtFull(Math.round(extraContrib))} to your pension. Use the Salary Sacrifice tool to model exact figures.`,
         priority: 2,
       });
     }
