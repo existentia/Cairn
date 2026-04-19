@@ -99,6 +99,12 @@ export const api = {
   salarySacrifice: (data) => apiFetch("/tools/salary-sacrifice", { method: "POST", body: JSON.stringify(data) }),
   debtPayoff: (data) => apiFetch("/tools/debt-payoff", { method: "POST", body: JSON.stringify(data) }),
 
+  // Goals
+  getGoals: () => apiFetch("/goals"),
+  createGoal: (data) => apiFetch("/goals", { method: "POST", body: JSON.stringify(data) }),
+  updateGoal: (id, data) => apiFetch(`/goals/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteGoal: (id) => apiFetch(`/goals/${id}`, { method: "DELETE" }),
+
   // Rates & Mortgage
   boeBaseRate: () => apiFetch("/rates/boe-base-rate"),
   mortgageScenarios: (data) => apiFetch("/tools/mortgage-scenarios", { method: "POST", body: JSON.stringify(data) }),

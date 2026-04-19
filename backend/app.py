@@ -80,6 +80,7 @@ def init_db():
             fixed_until TEXT DEFAULT '',
             term_end_date TEXT DEFAULT '',
             notes TEXT DEFAULT '',
+            total_contributed REAL NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -107,12 +108,35 @@ def init_db():
             mortgage_remaining_years INTEGER NOT NULL DEFAULT 20,
             net_worth_target REAL NOT NULL DEFAULT 0,
             net_worth_target_date TEXT NOT NULL DEFAULT '',
+            tax_region TEXT NOT NULL DEFAULT 'scotland',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
         -- Seed defaults if empty
         INSERT OR IGNORE INTO profile (id) VALUES (1);
         INSERT OR IGNORE INTO settings (id) VALUES (1);
+
+        CREATE TABLE IF NOT EXISTS snapshot_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            value REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY(snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            target_amount REAL NOT NULL DEFAULT 0,
+            target_date TEXT NOT NULL DEFAULT '',
+            icon TEXT NOT NULL DEFAULT '',
+            link_type TEXT NOT NULL DEFAULT '',
+            link_value TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
 
         CREATE TABLE IF NOT EXISTS auth_tokens (
             token TEXT PRIMARY KEY,
@@ -140,6 +164,7 @@ def init_db():
         ("mortgage_remaining_years", "INTEGER NOT NULL DEFAULT 20"),
         ("net_worth_target", "REAL NOT NULL DEFAULT 0"),
         ("net_worth_target_date", "TEXT NOT NULL DEFAULT ''"),
+        ("tax_region", "TEXT NOT NULL DEFAULT 'scotland'"),
     ]
     for col_name, col_def in migrations:
         if col_name not in existing_cols:
@@ -154,6 +179,16 @@ def init_db():
     for col_name, col_def in profile_migrations:
         if col_name not in profile_cols:
             db.execute(f"ALTER TABLE profile ADD COLUMN {col_name} {col_def}")
+
+    # Accounts migrations
+    cursor = db.execute("PRAGMA table_info(accounts)")
+    account_cols = {row[1] for row in cursor.fetchall()}
+    account_migrations = [
+        ("total_contributed", "REAL NOT NULL DEFAULT 0"),
+    ]
+    for col_name, col_def in account_migrations:
+        if col_name not in account_cols:
+            db.execute(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}")
     db.commit()
     db.close()
 
@@ -305,7 +340,7 @@ def update_account(account_id):
     allowed = [
         "name", "type", "balance", "provider", "contributing",
         "monthly_contrib", "interest_rate", "rate_type", "fixed_until",
-        "term_end_date", "notes", "sort_order",
+        "term_end_date", "notes", "sort_order", "total_contributed",
     ]
     for key in allowed:
         if key in data:
@@ -367,6 +402,26 @@ def create_snapshot():
         VALUES (?, ?, ?, ?, ?)
     """, (snapshot_date, net_worth, total_assets, total_liabilities, json.dumps(breakdown)))
     db.commit()
+
+    # Record per-category breakdown for the stacked history chart
+    snap_row = db.execute("SELECT id FROM snapshots WHERE date = ?", (snapshot_date,)).fetchone()
+    if snap_row:
+        snapshot_id = snap_row["id"]
+        categories = {
+            "pensions": sum(a["balance"] for a in accounts if a["type"] in {"PENSION_DC", "SIPP"}),
+            "isas":     sum(a["balance"] for a in accounts if a["type"] in {"ISA_SS", "ISA_CASH"}),
+            "property": sum(a["balance"] for a in accounts if a["type"] == "PROPERTY"),
+            "cash":     sum(a["balance"] for a in accounts if a["type"] in {"CURRENT", "SAVINGS"}),
+            "debts":   -sum(abs(a["balance"]) for a in accounts if a["type"] in liability_types),
+        }
+        db.execute("DELETE FROM snapshot_categories WHERE snapshot_id = ?", (snapshot_id,))
+        for cat, value in categories.items():
+            db.execute(
+                "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, ?, ?)",
+                (snapshot_id, cat, value)
+            )
+        db.commit()
+
     return jsonify({"date": snapshot_date, "net_worth": net_worth}), 201
 
 
@@ -403,6 +458,66 @@ def delete_snapshot(snapshot_id):
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
+# ── Goals ─────────────────────────────────────────────────────────────────────
+
+@app.route("/api/goals", methods=["GET"])
+@require_auth
+def get_goals():
+    db = get_db()
+    rows = db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/goals", methods=["POST"])
+@require_auth
+def create_goal():
+    data = request.get_json()
+    db = get_db()
+    cursor = db.execute("""
+        INSERT INTO goals (name, description, target_amount, target_date, icon, link_type, link_value, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("name", ""), data.get("description", ""),
+        data.get("target_amount", 0), data.get("target_date", ""),
+        data.get("icon", ""), data.get("link_type", ""),
+        data.get("link_value", ""), data.get("sort_order", 0),
+    ))
+    db.commit()
+    row = db.execute("SELECT * FROM goals WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/goals/<int:goal_id>", methods=["PUT"])
+@require_auth
+def update_goal(goal_id):
+    data = request.get_json()
+    db = get_db()
+    allowed = ["name", "description", "target_amount", "target_date", "icon", "link_type", "link_value", "sort_order"]
+    fields, values = [], []
+    for key in allowed:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+    if not fields:
+        return jsonify({"error": "No fields to update"}), 400
+    fields.append("updated_at = datetime('now')")
+    values.append(goal_id)
+    db.execute(f"UPDATE goals SET {', '.join(fields)} WHERE id = ?", values)
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/goals/<int:goal_id>", methods=["DELETE"])
+@require_auth
+def delete_goal(goal_id):
+    db = get_db()
+    db.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
 @app.route("/api/settings", methods=["GET"])
 @require_auth
 def get_settings():
@@ -422,6 +537,7 @@ def update_settings():
             pension_annual_allowance = ?, tax_year = ?,
             tracker_margin = ?, mortgage_remaining_years = ?,
             net_worth_target = ?, net_worth_target_date = ?,
+            tax_region = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
@@ -430,6 +546,7 @@ def update_settings():
         data.get("tax_year", "2025/26"),
         data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
         data.get("net_worth_target", 0), data.get("net_worth_target_date", ""),
+        data.get("tax_region", "scotland"),
     ))
     db.commit()
     return jsonify({"ok": True})
@@ -450,11 +567,31 @@ def get_dashboard():
     ).fetchall()]
     snapshots.reverse()
 
+    # Attach per-category breakdowns to each snapshot (for stacked area chart)
+    snapshot_ids = [s["id"] for s in snapshots]
+    if snapshot_ids:
+        placeholders = ",".join("?" * len(snapshot_ids))
+        cat_rows = db.execute(
+            f"SELECT * FROM snapshot_categories WHERE snapshot_id IN ({placeholders})",
+            snapshot_ids
+        ).fetchall()
+        cats_by_snap = {}
+        for row in cat_rows:
+            cats_by_snap.setdefault(row["snapshot_id"], {})[row["category"]] = row["value"]
+        for s in snapshots:
+            s["categories"] = cats_by_snap.get(s["id"], {})
+    else:
+        for s in snapshots:
+            s["categories"] = {}
+
+    goals = [dict(r) for r in db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()]
+
     return jsonify({
         "profile": profile,
         "accounts": accounts,
         "settings": settings,
         "snapshots": snapshots,
+        "goals": goals,
     })
 
 
@@ -469,6 +606,7 @@ def export_data():
         "accounts": [dict(r) for r in db.execute("SELECT * FROM accounts").fetchall()],
         "settings": dict(db.execute("SELECT * FROM settings WHERE id = 1").fetchone()),
         "snapshots": [dict(r) for r in db.execute("SELECT * FROM snapshots ORDER BY date").fetchall()],
+        "goals": [dict(r) for r in db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()],
         "exported_at": datetime.now().isoformat(),
     }
     return jsonify(data)
@@ -497,13 +635,14 @@ def import_data():
             db.execute("""
                 INSERT INTO accounts (name,type,balance,provider,contributing,
                     monthly_contrib,interest_rate,rate_type,fixed_until,
-                    term_end_date,notes,sort_order)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    term_end_date,notes,sort_order,total_contributed)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (a["name"], a["type"], a.get("balance",0), a.get("provider",""),
                   a.get("contributing",0), a.get("monthly_contrib",0),
                   a.get("interest_rate",0), a.get("rate_type",""),
                   a.get("fixed_until",""), a.get("term_end_date",""),
-                  a.get("notes",""), a.get("sort_order",0)))
+                  a.get("notes",""), a.get("sort_order",0),
+                  a.get("total_contributed",0)))
 
     if "settings" in data:
         s = data["settings"]
@@ -511,12 +650,15 @@ def import_data():
             UPDATE settings SET growth_rate=?, inflation_rate=?, isa_allowance=?,
                 pension_annual_allowance=?, tax_year=?,
                 tracker_margin=?, mortgage_remaining_years=?,
-                updated_at=datetime('now')
+                net_worth_target=?, net_worth_target_date=?,
+                tax_region=?, updated_at=datetime('now')
             WHERE id = 1
         """, (s.get("growth_rate",5.0), s.get("inflation_rate",2.5),
               s.get("isa_allowance",20000), s.get("pension_annual_allowance",60000),
               s.get("tax_year","2025/26"),
-              s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20)))
+              s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20),
+              s.get("net_worth_target",0), s.get("net_worth_target_date",""),
+              s.get("tax_region","scotland")))
 
     if "snapshots" in data:
         for snap in data["snapshots"]:
@@ -526,6 +668,17 @@ def import_data():
                 VALUES (?,?,?,?,?)
             """, (snap["date"], snap["net_worth"], snap.get("total_assets",0),
                   snap.get("total_liabilities",0), snap.get("breakdown","{}")))
+
+    if "goals" in data:
+        db.execute("DELETE FROM goals")
+        for g in data["goals"]:
+            db.execute("""
+                INSERT INTO goals (name, description, target_amount, target_date,
+                    icon, link_type, link_value, sort_order)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (g.get("name",""), g.get("description",""), g.get("target_amount",0),
+                  g.get("target_date",""), g.get("icon",""), g.get("link_type",""),
+                  g.get("link_value",""), g.get("sort_order",0)))
 
     db.commit()
     return jsonify({"ok": True, "message": "Data imported successfully"})
@@ -651,21 +804,28 @@ def salary_sacrifice_calc():
     current_pct = data.get("current_contrib_pct", 0)
     proposed_pct = data.get("proposed_contrib_pct", 0)
     employer_pct = data.get("employer_contrib_pct", 0)
+    tax_region = data.get("tax_region", "scotland")
 
-    # 2025/26 UK tax bands (Scotland)
-    def calc_scottish_tax_ni(gross_salary, sacrifice=0):
+    def calc_tax_ni(gross_salary, sacrifice=0, region="scotland"):
+        """2025/26 income tax + NI for Scotland or rUK (England, Wales, NI)."""
         taxable = gross_salary - sacrifice
         personal_allowance = 12570
 
-        # Scottish income tax 2025/26
-        bands = [
-            (14876, 0.19),   # Starter: £12,571 - £14,876
-            (26561, 0.20),   # Basic: £14,877 - £26,561
-            (43662, 0.21),   # Intermediate: £26,562 - £43,662
-            (75000, 0.42),   # Higher: £43,663 - £75,000
-            (125140, 0.45),  # Advanced: £75,001 - £125,140
-            (float('inf'), 0.48),  # Top: over £125,140
-        ]
+        if region == "scotland":
+            bands = [
+                (14876, 0.19),        # Starter:       £12,571 – £14,876
+                (26561, 0.20),        # Basic:         £14,877 – £26,561
+                (43662, 0.21),        # Intermediate:  £26,562 – £43,662
+                (75000, 0.42),        # Higher:        £43,663 – £75,000
+                (125140, 0.45),       # Advanced:      £75,001 – £125,140
+                (float('inf'), 0.48), # Top:           £125,141+
+            ]
+        else:  # rUK — England, Wales, Northern Ireland
+            bands = [
+                (50270, 0.20),        # Basic:         £12,571 – £50,270
+                (125140, 0.40),       # Higher:        £50,271 – £125,140
+                (float('inf'), 0.45), # Additional:    £125,141+
+            ]
 
         income_tax = 0
         remaining = max(0, taxable - personal_allowance)
@@ -679,22 +839,17 @@ def salary_sacrifice_calc():
             if remaining <= 0:
                 break
 
-        # Employee NI (Class 1) 2025/26
+        # Employee NI Class 1 — same across all UK regions
         ni_threshold = 12570
         upper_limit = 50270
-        ni_rate_main = 0.08
-        ni_rate_upper = 0.02
-
         ni_earnings = max(0, taxable - ni_threshold)
         if taxable <= upper_limit:
-            employee_ni = ni_earnings * ni_rate_main
+            employee_ni = ni_earnings * 0.08
         else:
-            employee_ni = (upper_limit - ni_threshold) * ni_rate_main + (taxable - upper_limit) * ni_rate_upper
+            employee_ni = (upper_limit - ni_threshold) * 0.08 + (taxable - upper_limit) * 0.02
 
-        # Employer NI
-        er_ni_threshold = 5000  # 2025/26
-        er_ni_rate = 0.15
-        employer_ni = max(0, taxable - er_ni_threshold) * er_ni_rate
+        # Employer NI 2025/26
+        employer_ni = max(0, taxable - 5000) * 0.15
 
         take_home = taxable - income_tax - employee_ni
 
@@ -710,8 +865,8 @@ def salary_sacrifice_calc():
     proposed_sacrifice = gross * (proposed_pct / 100)
     employer_contrib = gross * (employer_pct / 100)
 
-    current = calc_scottish_tax_ni(gross, current_sacrifice)
-    proposed = calc_scottish_tax_ni(gross, proposed_sacrifice)
+    current = calc_tax_ni(gross, current_sacrifice, tax_region)
+    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region)
 
     # Cost to take-home vs pension gain
     take_home_reduction = current["take_home"] - proposed["take_home"]

@@ -523,6 +523,30 @@ export default function App() {
     }
   };
 
+  const addGoal = async (goal) => {
+    try {
+      await api.createGoal(goal);
+      await loadData();
+      addToast(`Goal "${goal.name}" created`, "success");
+    } catch (e) { addToast("Failed to create goal", "error"); }
+  };
+
+  const saveGoal = async (goal) => {
+    try {
+      await api.updateGoal(goal.id, goal);
+      await loadData();
+      addToast("Goal updated", "success");
+    } catch (e) { addToast("Failed to update goal", "error"); }
+  };
+
+  const removeGoal = async (id) => {
+    try {
+      await api.deleteGoal(id);
+      await loadData();
+      addToast("Goal deleted", "success");
+    } catch (e) { addToast("Failed to delete goal", "error"); }
+  };
+
   const exportData = async () => {
     try {
       const d = await api.exportData();
@@ -543,7 +567,7 @@ export default function App() {
   if (!authed) return <><style>{globalStyles}</style><LoginScreen onLogin={handleLogin} /></>;
   if (!data) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading data...</div>;
 
-  const { profile, accounts, settings, snapshots } = data;
+  const { profile, accounts, settings, snapshots, goals = [] } = data;
   const assets = accounts.filter((a) => ASSET_TYPES.has(a.type));
   const liabilities = accounts.filter((a) => LIABILITY_TYPES.has(a.type));
   const totalAssets = assets.reduce((s, a) => s + a.balance, 0);
@@ -621,7 +645,7 @@ export default function App() {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
-          {[["overview", "Overview"], ["accounts", "Accounts"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
+          {[["overview", "Overview"], ["accounts", "Accounts"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
             <Tab key={id} label={l} active={tab === id} onClick={() => setTab(id)} />
           ))}
         </div>
@@ -657,6 +681,54 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* Stacked history chart — shown once we have snapshots with category data */}
+            {(() => {
+              const catSnaps = snapshots.filter((s) => s.categories && Object.keys(s.categories).length > 0);
+              if (catSnaps.length < 1) return null;
+              const CAT_CONFIG = [
+                { key: "pensions", label: "Pensions",   color: T.purple },
+                { key: "isas",     label: "ISAs",        color: T.accent },
+                { key: "property", label: "Property",   color: T.blue },
+                { key: "cash",     label: "Cash",        color: T.green },
+                { key: "debts",    label: "Debts",       color: T.red },
+              ];
+              const data = catSnaps.map((s) => ({
+                date: s.date,
+                ...Object.fromEntries(CAT_CONFIG.map(({ key }) => [key, s.categories[key] || 0])),
+              }));
+              const activeCats = CAT_CONFIG.filter((c) =>
+                data.some((d) => (d[c.key] || 0) !== 0)
+              );
+              return (
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Asset Mix Over Time</h3>
+                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>How your asset categories have grown with each snapshot</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <AreaChart data={data}>
+                      <defs>
+                        {activeCats.map(({ key, color }) => (
+                          <linearGradient key={key} id={`sg-${key}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity={0.5} />
+                            <stop offset="100%" stopColor={color} stopOpacity={0.05} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                      <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                      <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v, name) => [fmtFull(v), name]} />
+                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      {activeCats.map(({ key, label, color }) => (
+                        <Area key={key} type="monotone" dataKey={key} name={label}
+                          stackId={key === "debts" ? undefined : "assets"}
+                          stroke={color} fill={`url(#sg-${key})`} strokeWidth={1.5} dot={false} />
+                      ))}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              );
+            })()}
 
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
               <div style={{ flex: "1 1 300px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
@@ -884,6 +956,15 @@ export default function App() {
           </div>
         )}
 
+        {/* ── GOALS ────────────────────────────────────────────── */}
+        {tab === "goals" && (
+          <GoalsTab
+            goals={goals} accounts={accounts} netWorth={netWorth}
+            onAdd={addGoal} onSave={saveGoal} onDelete={removeGoal}
+            onGoToProjections={() => setTab("projections")}
+          />
+        )}
+
         {/* ── ADVISOR ──────────────────────────────────────────── */}
         {tab === "advisor" && <AdvisorTab insights={insights} />}
 
@@ -910,7 +991,7 @@ export default function App() {
 
         {/* ── TOOLS ────────────────────────────────────────────── */}
         {tab === "tools" && (
-          <ToolsTab profile={profile} accounts={accounts} settings={settings} />
+          <ToolsTab profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />
         )}
 
         {/* ── AI COPILOT ───────────────────────────────────────── */}
@@ -1337,18 +1418,367 @@ function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   TOOLS TAB — Salary Sacrifice & Debt Payoff
+   FIRE CALCULATOR
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function ToolsTab({ profile, accounts, settings }) {
-  const [activeTool, setActiveTool] = useState("salary-sacrifice");
+function FIRECalculator({ profile, accounts, settings, netWorth }) {
+  const defaultExpenses = Math.round(Math.max(1500, (profile.gross_salary * 0.55) / 12));
+  const [annualExpenses, setAnnualExpenses] = useState(defaultExpenses * 12);
+  const [swr, setSwr] = useState(4);
+
+  const realGrowthRate = Math.max(0, (settings.growth_rate - settings.inflation_rate)) / 100;
+  const monthlyRealGrowth = realGrowthRate / 12;
+
+  const monthlySavings = accounts
+    .filter((a) => ASSET_TYPES.has(a.type))
+    .reduce((s, a) => s + (a.monthly_contrib || 0), 0)
+    + (profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100)) / 12;
+
+  const fireNumber = swr > 0 ? Math.round(annualExpenses / (swr / 100)) : 0;
+  const progress = fireNumber > 0 ? Math.min(100, (netWorth / fireNumber) * 100) : 0;
+
+  // Years to FIRE (iterative: monthly compound)
+  const yearsToFIRE = useMemo(() => {
+    if (netWorth >= fireNumber) return 0;
+    if (monthlySavings <= 0 && netWorth <= 0) return null;
+    let pot = netWorth;
+    for (let m = 0; m <= 12 * 60; m++) {
+      if (pot >= fireNumber) return m / 12;
+      pot = pot * (1 + monthlyRealGrowth) + monthlySavings;
+    }
+    return null; // > 60 years
+  }, [netWorth, fireNumber, monthlySavings, monthlyRealGrowth]);
+
+  const fireDate = yearsToFIRE != null
+    ? new Date(Date.now() + yearsToFIRE * 365.25 * 24 * 3600 * 1000).getFullYear()
+    : null;
+
+  // Coast FIRE: pot needed now to grow to fireNumber by retirement_age without contributions
+  const age = ageFromDob(profile.dob);
+  const yearsToRetirement = Math.max(0, profile.retirement_age - age);
+  const coastFIRE = yearsToRetirement > 0 && fireNumber > 0
+    ? Math.round(fireNumber / Math.pow(1 + realGrowthRate, yearsToRetirement))
+    : fireNumber;
+  const hasCoasted = netWorth >= coastFIRE;
+
+  // Spending scenarios
+  const scenarios = [
+    { label: "Lean FIRE", swr: 5, factor: 0.7 },
+    { label: "Regular FIRE", swr: 4, factor: 1.0 },
+    { label: "Fat FIRE", swr: 3.5, factor: 1.3 },
+  ].map(({ label, swr: s, factor }) => {
+    const target = Math.round((annualExpenses * factor) / (s / 100));
+    const prog = Math.min(100, (netWorth / target) * 100);
+    return { label, swr: s, annualSpend: Math.round(annualExpenses * factor), target, progress: prog };
+  });
+
+  const ProgressBar = ({ value, color = T.accent }) => (
+    <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", marginTop: 6 }}>
+      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, value))}%`, background: color, borderRadius: 3, transition: "width 0.4s ease" }} />
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Inputs */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>FIRE Calculator</h3>
+        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
+          Financial Independence, Retire Early — find the portfolio size that funds your retirement indefinitely.
+          Based on the safe withdrawal rate (SWR) concept: FIRE number = annual expenses ÷ SWR.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Field label="Annual Expenses in Retirement" type="number" value={annualExpenses} onChange={setAnnualExpenses} prefix="£" />
+          <Field label="Safe Withdrawal Rate" type="number" value={swr} onChange={setSwr} suffix="%" small />
+          <div style={{ flex: "1 1 180px", display: "flex", alignItems: "flex-end", paddingBottom: 2 }}>
+            <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+              4% is the classic Trinity Study rate. 3.5% is more conservative; 5% works for shorter retirements.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Key metrics */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {[
+          { label: "FIRE Number", value: fmtFull(fireNumber), color: T.accent, sub: `${swr}% SWR on ${fmtFull(annualExpenses)}/yr` },
+          { label: "Current Progress", value: `${progress.toFixed(1)}%`, color: progress >= 100 ? T.green : T.blue, sub: `${fmtFull(netWorth)} of ${fmtFull(fireNumber)}` },
+          yearsToFIRE === 0
+            ? { label: "Status", value: "FIRE! 🔥", color: T.green, sub: "Net worth exceeds FIRE number" }
+            : yearsToFIRE != null
+              ? { label: "Years to FIRE", value: `${yearsToFIRE.toFixed(1)}y`, color: T.amber, sub: fireDate ? `Estimated ${fireDate}` : "" }
+              : { label: "Years to FIRE", value: ">60y", color: T.red, sub: "Increase savings or reduce target" },
+          { label: "Coast FIRE", value: fmtFull(coastFIRE), color: hasCoasted ? T.green : T.purple,
+            sub: hasCoasted ? "Already coasted — growth alone will do it" : `${yearsToRetirement}y of growth needed` },
+        ].map((m, i) => (
+          <div key={i} style={{ flex: "1 1 160px", padding: "12px 14px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
+            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontSize: 12, color: T.textMuted }}>Progress to FIRE</span>
+          <span style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: T.accent }}>{progress.toFixed(1)}%</span>
+        </div>
+        <ProgressBar value={progress} color={progress >= 100 ? T.green : T.accent} />
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim }}>{fmtFull(netWorth)} today</span>
+          <span style={{ fontSize: 10.5, color: T.textDim }}>{fmtFull(fireNumber)} target</span>
+        </div>
+
+        {/* Coast FIRE marker */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontSize: 12, color: T.textMuted }}>Coast FIRE progress</span>
+            <span style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: hasCoasted ? T.green : T.purple }}>
+              {Math.min(100, (netWorth / coastFIRE) * 100).toFixed(1)}%
+            </span>
+          </div>
+          <ProgressBar value={(netWorth / coastFIRE) * 100} color={hasCoasted ? T.green : T.purple} />
+          <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>
+            Coast FIRE means your pot (at {fmtFull(coastFIRE)}) would grow to your FIRE number by retirement age {profile.retirement_age} with no further contributions.
+          </div>
+        </div>
+      </div>
+
+      {/* Scenarios comparison */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h4 style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 14px" }}>Spending Scenarios</h4>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {scenarios.map((s) => (
+            <div key={s.label} style={{
+              flex: "1 1 180px", padding: "14px 16px", background: T.bg, borderRadius: T.radius,
+              border: `1px solid ${s.label === "Regular FIRE" ? T.accent + "44" : T.border}`,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
+              <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>{s.swr}% SWR · {fmtFull(s.annualSpend)}/yr</div>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{fmtFull(s.target)}</div>
+              <ProgressBar value={s.progress} color={s.progress >= 100 ? T.green : T.accent} />
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>{s.progress.toFixed(1)}% there</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: T.textDim, lineHeight: 1.6 }}>
+          Monthly savings used in projection: <strong style={{ color: T.textMuted }}>{fmtFull(Math.round(monthlySavings))}/month</strong> ·
+          Real growth rate: <strong style={{ color: T.textMuted }}>{(realGrowthRate * 100).toFixed(1)}%</strong> (after {settings.inflation_rate}% inflation)
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GOALS TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const GOAL_LINK_TYPES = [
+  { value: "", label: "Manual (no auto-tracking)" },
+  { value: "net_worth", label: "Overall Net Worth" },
+  { value: "type:PENSION_DC", label: "DC Pensions total" },
+  { value: "type:SIPP", label: "SIPP total" },
+  { value: "type:ISA_SS", label: "Stocks & Shares ISAs total" },
+  { value: "type:ISA_CASH", label: "Cash ISAs total" },
+  { value: "type:SAVINGS", label: "Savings Accounts total" },
+  { value: "type:CURRENT", label: "Current Accounts total" },
+  { value: "type:MORTGAGE", label: "Mortgage balance (pay-off goal)" },
+  { value: "type:CREDIT_CARD", label: "Credit Card balance (pay-off)" },
+];
+
+const GOAL_ICONS = ["🏠", "🚗", "✈️", "🎓", "💍", "🧸", "🌍", "💰", "🏖️", "🔥", "⛵", "🏔️", "🎯", "💼", "🏋️"];
+
+function GoalCard({ goal, currentValue, onEdit, onDelete }) {
+  const target = goal.target_amount;
+  const isPayoff = goal.link_type?.startsWith("type:MORTGAGE") || goal.link_type?.startsWith("type:CREDIT");
+  // For payoff goals: progress = how much has been paid off (higher balance = less progress)
+  const progress = target > 0
+    ? isPayoff
+      ? Math.min(100, Math.max(0, (1 - currentValue / target) * 100))
+      : Math.min(100, Math.max(0, (currentValue / target) * 100))
+    : 0;
+  const done = progress >= 100;
+  const color = done ? T.green : progress >= 50 ? T.accent : T.blue;
+
+  const daysLeft = goal.target_date
+    ? Math.ceil((new Date(goal.target_date) - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${done ? T.green + "55" : T.border}`, borderRadius: T.radius, padding: 18, position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {goal.icon && <span style={{ fontSize: 22 }}>{goal.icon}</span>}
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{goal.name}</div>
+            {goal.description && <div style={{ fontSize: 11, color: T.textDim, marginTop: 1 }}>{goal.description}</div>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          <button onClick={onEdit} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>Edit</button>
+          <button onClick={onDelete} style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>✕</button>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ height: 8, background: T.border, borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
+        <div style={{ height: "100%", width: `${progress}%`, background: color, borderRadius: 4, transition: "width 0.4s ease" }} />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+        <div>
+          <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 2 }}>
+            {goal.link_type ? `${fmtFull(isPayoff ? target - currentValue : currentValue)} of ${fmtFull(target)}` : `Target: ${fmtFull(target)}`}
+          </div>
+          {daysLeft != null && (
+            <div style={{ fontSize: 10.5, color: daysLeft < 30 ? T.red : daysLeft < 90 ? T.amber : T.textDim }}>
+              {daysLeft > 0 ? `${daysLeft}d remaining (${goal.target_date.slice(0, 7)})` : `Target date passed (${goal.target_date.slice(0, 7)})`}
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color }}>{progress.toFixed(0)}%</div>
+          {done && <div style={{ fontSize: 10, color: T.green, fontWeight: 600 }}>ACHIEVED ✓</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GoalForm({ initial, onSave, onCancel, accounts }) {
+  const [form, setForm] = useState(initial || {
+    name: "", description: "", target_amount: 0, target_date: "",
+    icon: "🎯", link_type: "", link_value: "",
+  });
+  const upd = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18, marginBottom: 14 }}>
+      <h4 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px" }}>{initial ? "Edit Goal" : "Add Goal"}</h4>
+      {/* Icon picker */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Icon</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {GOAL_ICONS.map((ic) => (
+            <button key={ic} onClick={() => upd("icon", ic)} style={{
+              fontSize: 18, background: form.icon === ic ? T.accent + "33" : "transparent",
+              border: `1px solid ${form.icon === ic ? T.accent : T.border}`, borderRadius: 6,
+              padding: "3px 6px", cursor: "pointer",
+            }}>{ic}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="Goal Name" value={form.name} onChange={(v) => upd("name", v)} />
+        <Field label="Target Amount" type="number" value={form.target_amount} onChange={(v) => upd("target_amount", v)} prefix="£" />
+        <Field label="Target Date (optional)" type="month" value={(form.target_date || "").slice(0, 7)} onChange={(v) => upd("target_date", v ? v + "-01" : "")} small />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Select label="Auto-track progress from" value={form.link_type} onChange={(v) => upd("link_type", v)}
+          options={GOAL_LINK_TYPES} />
+        <Field label="Notes (optional)" value={form.description} onChange={(v) => upd("description", v)} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn onClick={() => form.name && form.target_amount > 0 && onSave(form)}>Save Goal</Btn>
+      </div>
+    </div>
+  );
+}
+
+function GoalsTab({ goals, accounts, netWorth, onAdd, onSave, onDelete }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState(null);
+
+  // Compute current value for a goal based on link_type
+  const currentValueFor = (goal) => {
+    if (!goal.link_type) return 0;
+    if (goal.link_type === "net_worth") return netWorth;
+    if (goal.link_type.startsWith("type:")) {
+      const t = goal.link_type.slice(5);
+      return accounts.filter((a) => a.type === t).reduce((s, a) => s + Math.abs(a.balance), 0);
+    }
+    return 0;
+  };
+
+  const totalGoals = goals.length;
+  const achieved = goals.filter((g) => {
+    const cv = currentValueFor(g);
+    const isPayoff = g.link_type?.startsWith("type:MORTGAGE") || g.link_type?.startsWith("type:CREDIT");
+    const prog = g.target_amount > 0
+      ? isPayoff ? (1 - cv / g.target_amount) * 100 : (cv / g.target_amount) * 100
+      : 0;
+    return prog >= 100;
+  }).length;
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 3, marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 3px" }}>Financial Goals</h3>
+          <p style={{ fontSize: 11.5, color: T.textDim, margin: 0 }}>
+            {totalGoals === 0 ? "Set targets and track your progress automatically." : `${achieved} of ${totalGoals} goal${totalGoals !== 1 ? "s" : ""} achieved`}
+          </p>
+        </div>
+        <Btn onClick={() => { setShowAdd(!showAdd); setEditId(null); }}>{showAdd ? "Cancel" : "+ Add Goal"}</Btn>
+      </div>
+
+      {showAdd && (
+        <GoalForm accounts={accounts} onCancel={() => setShowAdd(false)} onSave={(g) => { onAdd(g); setShowAdd(false); }} />
+      )}
+
+      {editId && (
+        <GoalForm
+          initial={goals.find((g) => g.id === editId)}
+          accounts={accounts}
+          onCancel={() => setEditId(null)}
+          onSave={(g) => { onSave({ ...g, id: editId }); setEditId(null); }}
+        />
+      )}
+
+      {goals.length === 0 && !showAdd ? (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 40, textAlign: "center" }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🎯</div>
+          <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 6 }}>No goals yet</div>
+          <div style={{ fontSize: 12, color: T.textDim, marginBottom: 16 }}>
+            Add goals like a house deposit, emergency fund, or FIRE number — and track them automatically against your accounts.
+          </div>
+          <Btn onClick={() => setShowAdd(true)}>Add Your First Goal</Btn>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
+          {goals.filter((g) => g.id !== editId).map((g) => (
+            <GoalCard
+              key={g.id} goal={g}
+              currentValue={currentValueFor(g)}
+              onEdit={() => { setEditId(g.id); setShowAdd(false); }}
+              onDelete={() => onDelete(g.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOOLS TAB — Salary Sacrifice & Debt Payoff
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function ToolsTab({ profile, accounts, settings, netWorth }) {
+  const [activeTool, setActiveTool] = useState("fire");
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
+        <Tab label="FIRE Calculator" active={activeTool === "fire"} onClick={() => setActiveTool("fire")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
+      {activeTool === "fire" && <FIRECalculator profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>
