@@ -185,6 +185,7 @@ def init_db():
     account_cols = {row[1] for row in cursor.fetchall()}
     account_migrations = [
         ("total_contributed", "REAL NOT NULL DEFAULT 0"),
+        ("db_annual_pension", "REAL NOT NULL DEFAULT 0"),
     ]
     for col_name, col_def in account_migrations:
         if col_name not in account_cols:
@@ -340,7 +341,7 @@ def update_account(account_id):
     allowed = [
         "name", "type", "balance", "provider", "contributing",
         "monthly_contrib", "interest_rate", "rate_type", "fixed_until",
-        "term_end_date", "notes", "sort_order", "total_contributed",
+        "term_end_date", "notes", "sort_order", "total_contributed", "db_annual_pension",
     ]
     for key in allowed:
         if key in data:
@@ -408,7 +409,7 @@ def create_snapshot():
     if snap_row:
         snapshot_id = snap_row["id"]
         categories = {
-            "pensions": sum(a["balance"] for a in accounts if a["type"] in {"PENSION_DC", "SIPP"}),
+            "pensions": sum(a["balance"] for a in accounts if a["type"] in {"PENSION_DC", "SIPP", "PENSION_DB"}),
             "isas":     sum(a["balance"] for a in accounts if a["type"] in {"ISA_SS", "ISA_CASH"}),
             "property": sum(a["balance"] for a in accounts if a["type"] == "PROPERTY"),
             "cash":     sum(a["balance"] for a in accounts if a["type"] in {"CURRENT", "SAVINGS"}),
@@ -635,14 +636,14 @@ def import_data():
             db.execute("""
                 INSERT INTO accounts (name,type,balance,provider,contributing,
                     monthly_contrib,interest_rate,rate_type,fixed_until,
-                    term_end_date,notes,sort_order,total_contributed)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    term_end_date,notes,sort_order,total_contributed,db_annual_pension)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (a["name"], a["type"], a.get("balance",0), a.get("provider",""),
                   a.get("contributing",0), a.get("monthly_contrib",0),
                   a.get("interest_rate",0), a.get("rate_type",""),
                   a.get("fixed_until",""), a.get("term_end_date",""),
                   a.get("notes",""), a.get("sort_order",0),
-                  a.get("total_contributed",0)))
+                  a.get("total_contributed",0), a.get("db_annual_pension",0)))
 
     if "settings" in data:
         s = data["settings"]

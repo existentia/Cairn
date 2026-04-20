@@ -34,9 +34,9 @@ const T = {
 };
 
 const ACCOUNT_LABELS = {
-  PENSION_DC: "DC Pension", SIPP: "SIPP", ISA_SS: "Stocks & Shares ISA",
-  ISA_CASH: "Cash ISA", CURRENT: "Current Account", SAVINGS: "Savings Account",
-  PROPERTY: "Property",
+  PENSION_DC: "DC Pension", SIPP: "SIPP", PENSION_DB: "DB / Final Salary Pension",
+  ISA_SS: "Stocks & Shares ISA", ISA_CASH: "Cash ISA",
+  CURRENT: "Current Account", SAVINGS: "Savings Account", PROPERTY: "Property",
   MORTGAGE: "Mortgage", CREDIT_CARD: "Credit Card", LOAN: "Loan",
 };
 
@@ -294,7 +294,7 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             <Field label="Name" value={form.name} onChange={(v) => upd("name", v)} />
             <Field label="Provider" value={form.provider || ""} onChange={(v) => upd("provider", v)} />
-            <Field label={form.type === "PROPERTY" ? "Estimated Value" : "Balance"} type="number" value={form.balance} onChange={(v) => upd("balance", v)} prefix="£" />
+            <Field label={form.type === "PROPERTY" ? "Estimated Value" : form.type === "PENSION_DB" ? "Transfer Value (CETV)" : "Balance"} type="number" value={form.balance} onChange={(v) => upd("balance", v)} prefix="£" />
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             {(form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "SAVINGS") && (
@@ -302,6 +302,9 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
             )}
             {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
               <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+            )}
+            {form.type === "PENSION_DB" && (
+              <Field label="Annual Pension at Retirement" type="number" value={form.db_annual_pension || 0} onChange={(v) => upd("db_annual_pension", v)} prefix="£" small />
             )}
             {isLiab && (
               <>
@@ -333,7 +336,7 @@ function AccountForm({ onSave, onCancel }) {
   const [form, setForm] = useState({
     name: "", type: "PENSION_DC", balance: 0, provider: "", contributing: false,
     monthly_contrib: 0, interest_rate: 0, rate_type: "", fixed_until: "",
-    term_end_date: "", notes: "", total_contributed: 0,
+    term_end_date: "", notes: "", total_contributed: 0, db_annual_pension: 0,
   });
   const isLiab = LIABILITY_TYPES.has(form.type);
   const upd = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -348,13 +351,18 @@ function AccountForm({ onSave, onCancel }) {
         <Field label="Provider" value={form.provider} onChange={(v) => upd("provider", v)} />
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <Field label={isLiab ? "Outstanding Balance" : "Current Value"} type="number"
+        <Field label={isLiab ? "Outstanding Balance" : form.type === "PENSION_DB" ? "Transfer Value (CETV)" : "Current Value"} type="number"
           value={Math.abs(form.balance)} onChange={(v) => upd("balance", isLiab ? -v : v)} prefix="£" />
-        <Field label="Monthly Contribution / Payment" type="number" value={Math.abs(form.monthly_contrib)}
-          onChange={(v) => upd("monthly_contrib", isLiab ? -v : v)} prefix="£" small />
+        {form.type !== "PENSION_DB" && (
+          <Field label="Monthly Contribution / Payment" type="number" value={Math.abs(form.monthly_contrib)}
+            onChange={(v) => upd("monthly_contrib", isLiab ? -v : v)} prefix="£" small />
+        )}
         {isLiab && <Field label="Interest Rate" type="number" value={form.interest_rate} onChange={(v) => upd("interest_rate", v)} suffix="%" small />}
         {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
           <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+        )}
+        {form.type === "PENSION_DB" && (
+          <Field label="Annual Pension at Retirement" type="number" value={form.db_annual_pension || 0} onChange={(v) => upd("db_annual_pension", v)} prefix="£" small />
         )}
       </div>
       <Field label="Notes" value={form.notes} onChange={(v) => upd("notes", v)} />
@@ -912,7 +920,11 @@ export default function App() {
         })()}
 
         {/* ── PROJECTIONS ──────────────────────────────────────── */}
-        {tab === "projections" && (
+        {tab === "projections" && (() => {
+          const dbAnnualPension = accounts
+            .filter((a) => a.type === "PENSION_DB")
+            .reduce((s, a) => s + (a.db_annual_pension || 0), 0);
+          return (
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Investment Growth Projection</h3>
@@ -944,17 +956,21 @@ export default function App() {
                   { label: "4% drawdown (annual)", value: fmtFull(Math.round(retirementPot * 0.04)), color: T.blue },
                   { label: "4% drawdown (monthly)", value: fmtFull(Math.round(retirementPot * 0.04 / 12)), color: T.green },
                   { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || 11500)}/yr`, color: T.amber },
+                  ...(dbAnnualPension > 0 ? [{ label: "DB Pension (annual)", value: `${fmtFull(dbAnnualPension)}/yr`, color: T.purple, sub: "Guaranteed income" }] : []),
                 ].map((m, i) => (
                   <div key={i} style={{ flex: "1 1 170px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
                     <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
+                    {m.sub && <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>}
                   </div>
                 ))}
               </div>
             </div>
-            <DrawdownSimulator retirementPot={retirementPot} profile={profile} settings={settings} />
+            <TaxYearSummary profile={profile} accounts={accounts} settings={settings} />
+            <DrawdownSimulator retirementPot={retirementPot} profile={profile} settings={settings} dbAnnualPension={dbAnnualPension} />
           </div>
-        )}
+          );
+        })()}
 
         {/* ── GOALS ────────────────────────────────────────────── */}
         {tab === "goals" && (
@@ -1095,11 +1111,222 @@ function AssumptionSettings({ settings, onSave, saving }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   TAX YEAR SUMMARY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function TaxYearSummary({ profile, accounts, settings }) {
+  const now = new Date();
+  // UK tax year: 6 April – 5 April
+  const taxYearStartYear = now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6)
+    ? now.getFullYear() : now.getFullYear() - 1;
+  const taxYearEnd = new Date(taxYearStartYear + 1, 3, 5); // April 5 next year
+  const daysLeft = Math.ceil((taxYearEnd - now) / (1000 * 60 * 60 * 24));
+  const taxYearLabel = `${taxYearStartYear}/${String(taxYearStartYear + 1).slice(2)}`;
+
+  // ISA
+  const isaMonthly = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH")
+    .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+  const isaAnnualRate = isaMonthly * 12;
+  const isaAllowance = settings.isa_allowance || 20000;
+  const isaRemaining = Math.max(0, isaAllowance - isaAnnualRate);
+  const isaUsedPct = Math.min(100, (isaAnnualRate / isaAllowance) * 100);
+
+  // Pension (employee + employer)
+  const pensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
+  const pensionAllowance = settings.pension_annual_allowance || 60000;
+  const pensionRemaining = Math.max(0, pensionAllowance - pensionAnnual);
+  const pensionUsedPct = Math.min(100, (pensionAnnual / pensionAllowance) * 100);
+
+  // Personal allowance
+  const personalAllowance = 12570;
+  const taper = profile.gross_salary > 100000
+    ? Math.min(personalAllowance, Math.floor((profile.gross_salary - 100000) / 2)) : 0;
+  const effectivePA = personalAllowance - taper;
+
+  const Bar = ({ pct, color }) => (
+    <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: "hidden", margin: "5px 0" }}>
+      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 3 }} />
+    </div>
+  );
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>Tax Year Summary — {taxYearLabel}</h3>
+          <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>Estimated at current contribution rates</p>
+        </div>
+        <div style={{ background: daysLeft <= 30 ? T.red + "22" : daysLeft <= 90 ? T.amber + "22" : T.bg,
+          border: `1px solid ${daysLeft <= 30 ? T.red : daysLeft <= 90 ? T.amber : T.border}`,
+          borderRadius: 6, padding: "6px 12px", textAlign: "center" }}>
+          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: T.mono, color: daysLeft <= 30 ? T.red : daysLeft <= 90 ? T.amber : T.accent }}>{daysLeft}</div>
+          <div style={{ fontSize: 9, color: T.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>days to 5 Apr</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        {/* ISA */}
+        <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>ISA Allowance</span>
+            <span style={{ fontSize: 11, fontFamily: T.mono, color: isaUsedPct >= 100 ? T.green : T.accent }}>{isaUsedPct.toFixed(0)}%</span>
+          </div>
+          <Bar pct={isaUsedPct} color={isaUsedPct >= 100 ? T.green : T.accent} />
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(isaAnnualRate)} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(isaAllowance)}</span></div>
+          <div style={{ fontSize: 11, color: isaRemaining > 0 ? T.textDim : T.green, marginTop: 2 }}>
+            {isaRemaining > 0 ? `${fmtFull(isaRemaining)} remaining (${fmtFull(Math.round(isaRemaining / Math.max(1, daysLeft / 30)))}/mo to use it)` : "Allowance maxed ✓"}
+          </div>
+        </div>
+
+        {/* Pension */}
+        <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>Pension Annual Allowance</span>
+            <span style={{ fontSize: 11, fontFamily: T.mono, color: pensionUsedPct >= 100 ? T.green : T.blue }}>{pensionUsedPct.toFixed(0)}%</span>
+          </div>
+          <Bar pct={pensionUsedPct} color={pensionUsedPct >= 100 ? T.green : T.blue} />
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(Math.round(pensionAnnual))} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(pensionAllowance)}</span></div>
+          <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+            {pensionRemaining > 0 ? `${fmtFull(Math.round(pensionRemaining))} remaining · employee + employer` : "Annual allowance reached ✓"}
+          </div>
+        </div>
+
+        {/* Personal Allowance */}
+        <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${taper > 0 ? T.red + "55" : T.border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6 }}>Personal Allowance</div>
+          {taper > 0 ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: T.red }}>{fmtFull(effectivePA)}</div>
+              <div style={{ fontSize: 11, color: T.red, marginTop: 2 }}>Tapered — lost {fmtFull(taper)} (salary over £100k)</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 3 }}>Sacrifice to £100k via pension to restore full PA</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono }}>{fmtFull(effectivePA)}</div>
+              <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>Full allowance · 2025/26 rate</div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARRY-FORWARD PENSION ALLOWANCE CALCULATOR
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// UK pension annual allowances by tax year
+const PENSION_AA_HISTORY = [
+  { label: "2022/23", allowance: 40000 },
+  { label: "2023/24", allowance: 60000 },
+  { label: "2024/25", allowance: 60000 },
+];
+
+function CarryForwardTool({ profile, settings }) {
+  const currentAllowance = settings.pension_annual_allowance || 60000;
+  const currentContrib = Math.round(
+    profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100)
+  );
+
+  const [priorContribs, setPriorContribs] = useState(
+    Object.fromEntries(PENSION_AA_HISTORY.map((y) => [y.label, 0]))
+  );
+  const upd = (yr, v) => setPriorContribs((p) => ({ ...p, [yr]: Math.max(0, Number(v)) }));
+
+  const rows = PENSION_AA_HISTORY.map((y) => {
+    const contributed = priorContribs[y.label] || 0;
+    const unused = Math.max(0, y.allowance - contributed);
+    return { ...y, contributed, unused };
+  });
+
+  const totalCarryForward = rows.reduce((s, r) => s + r.unused, 0);
+  const totalAvailable = currentAllowance + totalCarryForward;
+  const capacityRemaining = Math.max(0, totalAvailable - currentContrib);
+  const currentUsedPct = Math.min(100, (currentContrib / totalAvailable) * 100);
+
+  // Months left in tax year (approx)
+  const now = new Date();
+  const taxYearEnd = new Date(
+    (now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6) ? now.getFullYear() + 1 : now.getFullYear()), 3, 5
+  );
+  const monthsLeft = Math.max(1, Math.round((taxYearEnd - now) / (1000 * 60 * 60 * 24 * 30.5)));
+  const monthlyNeeded = capacityRemaining > 0 ? Math.round(capacityRemaining / monthsLeft) : 0;
+
+  const Row = ({ label, allowance, contributed, unused, highlight }) => (
+    <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, alignItems: "center" }}>
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: highlight ? T.accent : T.text, fontWeight: highlight ? 600 : 400 }}>{label}</div>
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(allowance)}</div>
+      {highlight ? (
+        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
+      ) : (
+        <div>
+          <input type="number" value={contributed || ""} onChange={(e) => upd(label, e.target.value)}
+            placeholder="0"
+            style={{ width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text,
+              padding: "4px 8px", fontSize: 12, fontFamily: T.mono, outline: "none" }} />
+        </div>
+      )}
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: unused > 0 ? T.green : T.textDim, fontWeight: unused > 0 ? 600 : 400 }}>
+        {unused > 0 ? `+${fmtFull(unused)}` : "—"}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Pension Carry-Forward Calculator</h3>
+        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px", lineHeight: 1.6 }}>
+          Unused pension annual allowance from the 3 prior tax years can be carried forward and added to this year's allowance.
+          You must exhaust the current year's allowance (£{currentAllowance.toLocaleString()}) first, and must have been a member of a registered pension scheme in each carry-forward year.
+        </p>
+
+        {/* Header */}
+        <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "6px 0", borderBottom: `1px solid ${T.border}`, marginBottom: 4 }}>
+          {["Tax Year", "Allowance", "Contributed", "Unused (CF)"].map((h) => (
+            <div key={h} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</div>
+          ))}
+        </div>
+
+        {rows.map((r) => <Row key={r.label} {...r} />)}
+        <Row label="2025/26" allowance={currentAllowance} contributed={currentContrib} unused={Math.max(0, currentAllowance - currentContrib)} highlight />
+      </div>
+
+      {/* Results */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {[
+          { label: "Total carry-forward available", value: fmtFull(totalCarryForward), color: T.green, sub: "From 3 prior years" },
+          { label: "Total allowance this year", value: fmtFull(totalAvailable), color: T.accent, sub: `${fmtFull(currentAllowance)} + ${fmtFull(totalCarryForward)} CF` },
+          { label: "Remaining capacity", value: fmtFull(capacityRemaining), color: capacityRemaining > 0 ? T.blue : T.textDim, sub: "After estimated current contribs" },
+          { label: "Monthly sacrifice needed", value: capacityRemaining > 0 ? `${fmtFull(monthlyNeeded)}/mo` : "None needed", color: capacityRemaining > 0 ? T.amber : T.green, sub: `To use by 5 April (${monthsLeft} months left)` },
+        ].map((m, i) => (
+          <div key={i} style={{ flex: "1 1 160px", padding: "12px 14px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
+            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {capacityRemaining > 0 && (
+        <div style={{ background: T.surface, border: `1px solid ${T.amber}33`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12, color: T.textMuted, lineHeight: 1.7 }}>
+          <strong style={{ color: T.amber }}>Opportunity:</strong> You have {fmtFull(capacityRemaining)} of carry-forward capacity.
+          At your salary (£{profile.gross_salary.toLocaleString()}), a one-off or increased salary sacrifice contribution this tax year
+          could use this up — saving significant income tax on the way in. Use the <strong>Salary Sacrifice</strong> tool to model the exact take-home impact.
+          Carry-forward cannot be used once the tax year closes on 5 April.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    DRAWDOWN SIMULATOR
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function DrawdownSimulator({ retirementPot, profile, settings }) {
-  const spAnnual = profile.state_pension_annual || 11500;
+function DrawdownSimulator({ retirementPot, profile, settings, dbAnnualPension = 0 }) {
+  const spAnnual = (profile.state_pension_annual || 11500) + dbAnnualPension;
   const realGrowth = Math.max(0, settings.growth_rate - settings.inflation_rate) / 100;
   const defaultMonthly = retirementPot > 0 ? Math.max(500, Math.round(retirementPot * 0.04 / 12)) : 2500;
   const [monthlySpend, setMonthlySpend] = useState(defaultMonthly);
@@ -1153,7 +1380,7 @@ function DrawdownSimulator({ retirementPot, profile, settings }) {
     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
       <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Drawdown Simulator</h3>
       <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 16px" }}>
-        Pot balance from retirement (age {profile.retirement_age}) at different spending levels · Today's money · State pension of {fmtFull(spAnnual)}/yr at 67 reduces pot withdrawals
+        Pot balance from retirement (age {profile.retirement_age}) · Today's money · {fmtFull(spAnnual)}/yr guaranteed income at 67 reduces pot withdrawals{dbAnnualPension > 0 ? ` (SP + DB pension)` : ""}
       </p>
 
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
@@ -1775,10 +2002,12 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
     <div>
       <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
         <Tab label="FIRE Calculator" active={activeTool === "fire"} onClick={() => setActiveTool("fire")} />
+        <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
       {activeTool === "fire" && <FIRECalculator profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />}
+      {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>

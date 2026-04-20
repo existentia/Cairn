@@ -8,7 +8,7 @@
  *   priority: 1 (highest) → 5 (lowest)
  */
 
-const ASSET_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"]);
+const ASSET_TYPES = new Set(["PENSION_DC", "SIPP", "PENSION_DB", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"]);
 const LIABILITY_TYPES = new Set(["MORTGAGE", "CREDIT_CARD", "LOAN"]);
 
 const fmtFull = (v) =>
