@@ -10,7 +10,7 @@ import { generateInsights, ASSET_TYPES, LIABILITY_TYPES, fmtFull, ageFromDob } f
    DESIGN TOKENS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const T = {
+const DARK_THEME = {
   bg: "#0b0e14",
   surface: "#141821",
   surfaceHover: "#1a1f2d",
@@ -33,6 +33,31 @@ const T = {
   mono: "'IBM Plex Mono', 'SF Mono', monospace",
 };
 
+const LIGHT_THEME = {
+  bg: "#f0f2f7",
+  surface: "#ffffff",
+  surfaceHover: "#f5f7fc",
+  border: "#dce1ed",
+  borderLight: "#c8d0e0",
+  text: "#1c2035",
+  textMuted: "#5a6280",
+  textDim: "#9aa0b8",
+  accent: "#2ea898",
+  accentHover: "#34bfad",
+  green: "#2ea898",
+  red: "#d94f61",
+  amber: "#c8900a",
+  blue: "#3d6fcc",
+  purple: "#7c52cc",
+  chartPalette: ["#2ea898", "#3d6fcc", "#7c52cc", "#c8900a", "#d9714e", "#3aaa5c"],
+  debtPalette: ["#d94f61", "#d9714e"],
+  radius: 8,
+  font: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+  mono: "'IBM Plex Mono', 'SF Mono', monospace",
+};
+
+const T = { ...DARK_THEME };
+
 const ACCOUNT_LABELS = {
   PENSION_DC: "DC Pension", SIPP: "SIPP", PENSION_DB: "DB / Final Salary Pension",
   ISA_SS: "Stocks & Shares ISA", ISA_CASH: "Cash ISA",
@@ -49,7 +74,7 @@ const fmt = (v) => {
   return `${sign}£${abs.toFixed(0)}`;
 };
 
-const globalStyles = `
+const makeGlobalStyles = () => `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: ${T.bg}; color: ${T.text}; font-family: ${T.font}; -webkit-font-smoothing: antialiased; }
@@ -385,6 +410,18 @@ export default function App() {
   const [accountSearch, setAccountSearch] = useState("");
   const [accountTypeFilter, setAccountTypeFilter] = useState("all");
   const { addToast, ToastContainer } = useToast();
+  const [isDark, setIsDark] = useState(() => localStorage.getItem("cairn_theme") !== "light");
+
+  // Sync mutable T to current theme on every render
+  Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
+
+  const toggleTheme = () => {
+    setIsDark((prev) => {
+      const next = !prev;
+      localStorage.setItem("cairn_theme", next ? "dark" : "light");
+      return next;
+    });
+  };
 
   // Check auth on mount
   useEffect(() => {
@@ -570,19 +607,6 @@ export default function App() {
   if (loading) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading...</div>;
   if (!authed) return <><style>{makeGlobalStyles()}</style><LoginScreen onLogin={handleLogin} /></>;
   if (!data) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading data...</div>;
-
-  const [isDark, setIsDark] = useState(() => localStorage.getItem("cairn_theme") !== "light");
-
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev;
-      localStorage.setItem("cairn_theme", next ? "dark" : "light");
-      return next;
-    });
-  };
-
-  // Sync mutable T to current theme on every render
-  Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
 
   const { profile, accounts, settings, snapshots, goals = [] } = data;
   const assets = accounts.filter((a) => ASSET_TYPES.has(a.type));
