@@ -196,13 +196,9 @@ function Btn({ children, onClick, variant = "primary", style: extraStyle }) {
   );
 }
 
-const ttStyle = {
-  backgroundColor: "#1a1f2e", border: `1px solid ${T.borderLight}`, borderRadius: T.radius,
-  fontSize: 12, color: "#f0f1f5", padding: "10px 14px",
-  boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-};
-const ttItemStyle = { color: "#f0f1f5", fontSize: 12, padding: "2px 0" };
-const ttLabelStyle = { color: "#b0b4c4", fontSize: 11, fontWeight: 600, marginBottom: 4 };
+const ttStyle    = () => ({ backgroundColor: T.surface, border: `1px solid ${T.borderLight}`, borderRadius: T.radius, fontSize: 12, color: T.text, padding: "10px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.15)" });
+const ttItemStyle = () => ({ color: T.text, fontSize: 12, padding: "2px 0" });
+const ttLabelStyle = () => ({ color: T.textMuted, fontSize: 11, fontWeight: 600, marginBottom: 4 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LOGIN SCREEN
@@ -572,8 +568,21 @@ export default function App() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading...</div>;
-  if (!authed) return <><style>{globalStyles}</style><LoginScreen onLogin={handleLogin} /></>;
+  if (!authed) return <><style>{makeGlobalStyles()}</style><LoginScreen onLogin={handleLogin} /></>;
   if (!data) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading data...</div>;
+
+  const [isDark, setIsDark] = useState(() => localStorage.getItem("cairn_theme") !== "light");
+
+  const toggleTheme = () => {
+    setIsDark((prev) => {
+      const next = !prev;
+      localStorage.setItem("cairn_theme", next ? "dark" : "light");
+      return next;
+    });
+  };
+
+  // Sync mutable T to current theme on every render
+  Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
 
   const { profile, accounts, settings, snapshots, goals = [] } = data;
   const assets = accounts.filter((a) => ASSET_TYPES.has(a.type));
@@ -616,7 +625,7 @@ export default function App() {
 
   return (
     <>
-      <style>{globalStyles}</style>
+      <style>{makeGlobalStyles()}</style>
       <ToastContainer />
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>
 
@@ -637,6 +646,15 @@ export default function App() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={toggleTheme}
+              title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+              style={{
+                background: "none", border: `1px solid ${T.border}`, borderRadius: T.radius,
+                color: T.textMuted, cursor: "pointer", padding: "5px 10px", fontSize: 15,
+                lineHeight: 1, transition: "border-color 0.15s",
+              }}
+            >{isDark ? "☀️" : "🌙"}</button>
             <Btn variant="secondary" onClick={takeSnapshot} style={{ fontSize: 11 }}>📸 Snapshot</Btn>
             <Btn variant="secondary" onClick={exportData} style={{ fontSize: 11 }}>↓ Export</Btn>
             <Btn variant="secondary" onClick={handleLogout} style={{ fontSize: 11 }}>Sign Out</Btn>
@@ -670,7 +688,7 @@ export default function App() {
                     <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
                     <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                    <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} />
+                    <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
                     <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
                     {settings.net_worth_target > 0 && (
                       <ReferenceLine
@@ -725,7 +743,7 @@ export default function App() {
                       <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                       <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
                       <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                      <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v, name) => [fmtFull(v), name]} />
+                      <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v, name) => [fmtFull(v), name]} />
                       <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                       {activeCats.map(({ key, label, color }) => (
                         <Area key={key} type="monotone" dataKey={key} name={label}
@@ -748,7 +766,7 @@ export default function App() {
                         <Pie data={allocationData} cx="50%" cy="50%" innerRadius={50} outerRadius={82} paddingAngle={3} dataKey="value">
                           {allocationData.map((_, i) => <Cell key={i} fill={T.chartPalette[i % T.chartPalette.length]} />)}
                         </Pie>
-                        <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} />
+                        <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 14px", marginTop: 6 }}>
@@ -940,7 +958,7 @@ export default function App() {
                   <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                   <XAxis dataKey="year" tick={{ fontSize: 10, fill: T.textDim }} />
                   <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                  <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
+                  <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
                   <Area type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
                   <Area type="monotone" dataKey="isas" name="ISAs" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -1405,7 +1423,7 @@ function DrawdownSimulator({ retirementPot, profile, settings, dbAnnualPension =
           <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
           <XAxis dataKey="age" tick={{ fontSize: 10, fill: T.textDim }} label={{ value: "Age", position: "insideBottomRight", offset: -4, fill: T.textDim, fontSize: 10 }} />
           <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-          <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle}
+          <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()}
             formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Age ${v}`} />
           <Area type="monotone" dataKey="balance" name="Pot Balance" stroke={T.purple} fill="url(#ddG)" strokeWidth={2} dot={false} />
           {spStartsAt && (
@@ -2469,7 +2487,7 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
               <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => v.slice(0, 7)} interval={Math.max(1, Math.floor(chartData.length / 12))} />
               <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => `${v}%`} domain={[0, "auto"]} />
-              <Tooltip contentStyle={ttStyle} itemStyle={ttItemStyle} labelStyle={ttLabelStyle} formatter={v => `${v}%`} />
+              <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={v => `${v}%`} />
               <Area type="stepAfter" dataKey="rate" name="Base Rate" stroke={T.accent} fill="url(#brGrad)" strokeWidth={2} />
               {mortgage && (
                 <Area type="stepAfter" dataKey="tracker" name="Your Tracker" stroke={T.blue} fill="none" strokeWidth={2} strokeDasharray="6 3" />
