@@ -4,7 +4,9 @@ Serves the React SPA and provides a REST API backed by SQLite.
 """
 
 import os
+import sys
 import json
+import random
 import sqlite3
 import hashlib
 import secrets
@@ -13,23 +15,42 @@ from pathlib import Path
 from functools import wraps
 
 from flask import Flask, request, jsonify, send_from_directory, g
-from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
+
+# Make sibling modules importable whether we're launched as `python app.py`
+# from backend/, or as `gunicorn backend.app:app` from the project root.
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from uk_tax import (
+    ASSET_TYPES, LIABILITY_TYPES,
+    INVESTMENT_PENSION_TYPES, ISA_TYPES,
+    calc_tax_ni,
+    SCOTLAND_HIGHER_RATE_THRESHOLD, RUK_HIGHER_RATE_THRESHOLD,
+)
+from snapshots import take_snapshot
+from migrations import run_migrations
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "cairn.db"
 STATIC_DIR = BASE_DIR / "static"
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-key-change-me")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+
+# 5 MB cap on request bodies — generous for JSON imports, blocks abuse.
+MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["SECRET_KEY"] = SECRET_KEY
-CORS(app)
+# Flask wants *a* SECRET_KEY for any session-derived feature. Auth here is
+# Bearer-token via the auth_tokens table, so this is just to keep Flask happy —
+# a fresh value per process is fine.
+app.config["SECRET_KEY"] = secrets.token_hex(32)
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -53,6 +74,7 @@ def close_db(exc):
 def init_db():
     """Create tables if they don't exist."""
     db = sqlite3.connect(str(DB_PATH))
+    db.row_factory = sqlite3.Row
     db.executescript("""
         CREATE TABLE IF NOT EXISTS profile (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -156,54 +178,32 @@ def init_db():
     """)
     db.commit()
 
-    # Migrate existing databases — add new columns if missing
-    cursor = db.execute("PRAGMA table_info(settings)")
-    existing_cols = {row[1] for row in cursor.fetchall()}
-    migrations = [
-        ("tracker_margin", "REAL NOT NULL DEFAULT 0.5"),
-        ("mortgage_remaining_years", "INTEGER NOT NULL DEFAULT 20"),
-        ("net_worth_target", "REAL NOT NULL DEFAULT 0"),
-        ("net_worth_target_date", "TEXT NOT NULL DEFAULT ''"),
-        ("tax_region", "TEXT NOT NULL DEFAULT 'scotland'"),
-    ]
-    for col_name, col_def in migrations:
-        if col_name not in existing_cols:
-            db.execute(f"ALTER TABLE settings ADD COLUMN {col_name} {col_def}")
+    applied = run_migrations(db)
+    if applied:
+        print(f"Applied {applied} migration(s).")
 
-    # Profile migrations
-    cursor = db.execute("PRAGMA table_info(profile)")
-    profile_cols = {row[1] for row in cursor.fetchall()}
-    profile_migrations = [
-        ("state_pension_annual", "REAL NOT NULL DEFAULT 11500"),
-    ]
-    for col_name, col_def in profile_migrations:
-        if col_name not in profile_cols:
-            db.execute(f"ALTER TABLE profile ADD COLUMN {col_name} {col_def}")
-
-    # Accounts migrations
-    cursor = db.execute("PRAGMA table_info(accounts)")
-    account_cols = {row[1] for row in cursor.fetchall()}
-    account_migrations = [
-        ("total_contributed", "REAL NOT NULL DEFAULT 0"),
-        ("db_annual_pension", "REAL NOT NULL DEFAULT 0"),
-    ]
-    for col_name, col_def in account_migrations:
-        if col_name not in account_cols:
-            db.execute(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}")
-    db.commit()
     db.close()
 
 
 def ensure_password_hash():
-    """Hash ADMIN_PASSWORD and store it, or update the hash if the password changed."""
+    """Hash ADMIN_PASSWORD and store it, or update the hash if the password changed.
+    When the password changes, all existing Bearer tokens are invalidated so
+    rotating the env var actually forces re-login everywhere."""
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     row = db.execute("SELECT password_hash FROM auth WHERE id = 1").fetchone()
-    if not row or not row["password_hash"] or not check_password_hash(row["password_hash"], ADMIN_PASSWORD):
+    password_changed = (
+        not row
+        or not row["password_hash"]
+        or not check_password_hash(row["password_hash"], ADMIN_PASSWORD)
+    )
+    if password_changed:
         db.execute(
             "INSERT OR REPLACE INTO auth (id, password_hash) VALUES (1, ?)",
             (generate_password_hash(ADMIN_PASSWORD),)
         )
+        # Existing sessions are tied to the old credentials — wipe them.
+        db.execute("DELETE FROM auth_tokens")
         db.commit()
     db.close()
 
@@ -217,6 +217,11 @@ def require_auth(f):
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             db = get_db()
+            # Sampled cleanup of expired tokens (~1% of authenticated requests)
+            # so the auth_tokens table doesn't accumulate forever.
+            if random.random() < 0.01:
+                db.execute("DELETE FROM auth_tokens WHERE expires_at < datetime('now')")
+                db.commit()
             row = db.execute(
                 "SELECT token FROM auth_tokens WHERE token = ? AND expires_at > datetime('now')",
                 (token,)
@@ -382,56 +387,23 @@ def get_snapshots():
 @require_auth
 def create_snapshot():
     """Take a snapshot of current net worth. Can be called manually or via cron."""
-    db = get_db()
-    accounts = db.execute("SELECT * FROM accounts").fetchall()
-
-    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
-    liability_types = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
-
-    total_assets = sum(a["balance"] for a in accounts if a["type"] in asset_types)
-    total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in liability_types)
-    net_worth = total_assets - total_liabilities
-
-    breakdown = {}
-    for a in accounts:
-        breakdown[a["name"]] = a["balance"]
-
-    snapshot_date = request.get_json().get("date", date.today().isoformat()) if request.is_json else date.today().isoformat()
-
-    db.execute("""
-        INSERT OR REPLACE INTO snapshots (date, net_worth, total_assets, total_liabilities, breakdown)
-        VALUES (?, ?, ?, ?, ?)
-    """, (snapshot_date, net_worth, total_assets, total_liabilities, json.dumps(breakdown)))
-    db.commit()
-
-    # Record per-category breakdown for the stacked history chart
-    snap_row = db.execute("SELECT id FROM snapshots WHERE date = ?", (snapshot_date,)).fetchone()
-    if snap_row:
-        snapshot_id = snap_row["id"]
-        categories = {
-            "pensions": sum(a["balance"] for a in accounts if a["type"] in {"PENSION_DC", "SIPP", "PENSION_DB"}),
-            "isas":     sum(a["balance"] for a in accounts if a["type"] in {"ISA_SS", "ISA_CASH"}),
-            "property": sum(a["balance"] for a in accounts if a["type"] == "PROPERTY"),
-            "cash":     sum(a["balance"] for a in accounts if a["type"] in {"CURRENT", "SAVINGS"}),
-            "debts":   -sum(abs(a["balance"]) for a in accounts if a["type"] in liability_types),
-        }
-        db.execute("DELETE FROM snapshot_categories WHERE snapshot_id = ?", (snapshot_id,))
-        for cat, value in categories.items():
-            db.execute(
-                "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, ?, ?)",
-                (snapshot_id, cat, value)
-            )
-        db.commit()
-
+    payload = request.get_json(silent=True) or {}
+    snapshot_date, net_worth = take_snapshot(get_db(), payload.get("date"))
     return jsonify({"date": snapshot_date, "net_worth": net_worth}), 201
 
 
 @app.route("/api/snapshots/<int:snapshot_id>", methods=["PUT"])
 @require_auth
 def update_snapshot(snapshot_id):
-    """Edit a snapshot's date or values."""
+    """Edit a snapshot's date or values. If totals change, scale the stored
+    category breakdown proportionally so the line chart and stacked chart
+    stay consistent."""
     data = request.get_json()
     db = get_db()
+    existing = db.execute("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "Snapshot not found"}), 404
+
     fields = []
     values = []
     allowed = ["date", "net_worth", "total_assets", "total_liabilities"]
@@ -443,6 +415,32 @@ def update_snapshot(snapshot_id):
         return jsonify({"error": "No fields to update"}), 400
     values.append(snapshot_id)
     db.execute(f"UPDATE snapshots SET {', '.join(fields)} WHERE id = ?", values)
+
+    new_assets = data.get("total_assets", existing["total_assets"])
+    new_liabs = data.get("total_liabilities", existing["total_liabilities"])
+    old_assets = existing["total_assets"] or 0
+    old_liabs = existing["total_liabilities"] or 0
+    if new_assets != old_assets or new_liabs != old_liabs:
+        cats = db.execute(
+            "SELECT id, category, value FROM snapshot_categories WHERE snapshot_id = ?",
+            (snapshot_id,)
+        ).fetchall()
+        for c in cats:
+            if c["category"] == "debts":
+                if old_liabs > 0:
+                    new_val = c["value"] * (new_liabs / old_liabs)
+                else:
+                    new_val = -new_liabs
+            else:
+                if old_assets > 0:
+                    new_val = c["value"] * (new_assets / old_assets)
+                else:
+                    new_val = c["value"]
+            db.execute(
+                "UPDATE snapshot_categories SET value = ? WHERE id = ?",
+                (new_val, c["id"])
+            )
+
     db.commit()
     return jsonify({"ok": True})
 
@@ -602,11 +600,25 @@ def get_dashboard():
 @require_auth
 def export_data():
     db = get_db()
+    snapshots = [dict(r) for r in db.execute("SELECT * FROM snapshots ORDER BY date").fetchall()]
+    if snapshots:
+        ids = [s["id"] for s in snapshots]
+        placeholders = ",".join("?" * len(ids))
+        cat_rows = db.execute(
+            f"SELECT snapshot_id, category, value FROM snapshot_categories WHERE snapshot_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        by_snap = {}
+        for r in cat_rows:
+            by_snap.setdefault(r["snapshot_id"], {})[r["category"]] = r["value"]
+        for s in snapshots:
+            s["categories"] = by_snap.get(s["id"], {})
+
     data = {
         "profile": dict(db.execute("SELECT * FROM profile WHERE id = 1").fetchone()),
         "accounts": [dict(r) for r in db.execute("SELECT * FROM accounts").fetchall()],
         "settings": dict(db.execute("SELECT * FROM settings WHERE id = 1").fetchone()),
-        "snapshots": [dict(r) for r in db.execute("SELECT * FROM snapshots ORDER BY date").fetchall()],
+        "snapshots": snapshots,
         "goals": [dict(r) for r in db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()],
         "exported_at": datetime.now().isoformat(),
     }
@@ -669,6 +681,17 @@ def import_data():
                 VALUES (?,?,?,?,?)
             """, (snap["date"], snap["net_worth"], snap.get("total_assets",0),
                   snap.get("total_liabilities",0), snap.get("breakdown","{}")))
+            cats = snap.get("categories") or {}
+            if cats:
+                sid_row = db.execute("SELECT id FROM snapshots WHERE date = ?", (snap["date"],)).fetchone()
+                if sid_row:
+                    sid = sid_row["id"]
+                    db.execute("DELETE FROM snapshot_categories WHERE snapshot_id = ?", (sid,))
+                    for cat, value in cats.items():
+                        db.execute(
+                            "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, ?, ?)",
+                            (sid, cat, value),
+                        )
 
     if "goals" in data:
         db.execute("DELETE FROM goals")
@@ -687,12 +710,44 @@ def import_data():
 
 # ── AI Commentary (Claude API) ────────────────────────────────────────────────
 
+import anthropic
+
 CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = "claude-sonnet-4-6"
+
+# Marked cacheable. Anthropic ignores cache_control on prefixes below ~2k tokens,
+# so today this is a no-op — but the structure is in place if the persona grows
+# (e.g. richer UK tax context). Volatile per-user data lives in the user turn.
+_COMMENTARY_SYSTEM_PROMPT = (
+    "You are a knowledgeable UK personal finance commentator. Provide a "
+    "concise, plain-English analysis of the person's financial position from "
+    "the data they share. Be direct, practical, and specific. Focus on "
+    "actionable observations and prioritise the things that would move the "
+    "needle most for them.\n\n"
+    "UK context to apply when relevant:\n"
+    "- ISA allowance £20,000/year; pension annual allowance £60,000, with "
+    "carry-forward of unused allowance from the 3 prior tax years.\n"
+    "- Scotland and rest-of-UK have different income tax bands; salary "
+    "sacrifice saves both income tax and employee NI.\n"
+    "- Personal Allowance tapers between £100k and £125,140 of income, "
+    "creating a ~60% effective marginal rate in that band.\n"
+    "- 4% Trinity-style drawdown is the common FIRE benchmark; 3.0–3.5% is "
+    "more conservative for early retirees with longer horizons.\n"
+    "- Full new State Pension is roughly £11,500/year from State Pension age "
+    "(currently 67). Private pension access age rises from 55 to 57 in "
+    "April 2028.\n\n"
+    "Do NOT give regulated financial advice — frame everything as general "
+    "observations. End with a one-line reminder that this is general "
+    "information, not advice.\n\n"
+    "Output: 3-4 short paragraphs of plain prose. No bullet lists, no "
+    "section headers."
+)
+
 
 @app.route("/api/ai/commentary", methods=["POST"])
 @require_auth
 def ai_commentary():
-    """Generate natural-language financial commentary using Claude API."""
+    """Generate natural-language financial commentary using the Claude API."""
     if not CLAUDE_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 503
 
@@ -704,94 +759,86 @@ def ai_commentary():
         "SELECT date, net_worth, total_assets, total_liabilities FROM snapshots ORDER BY date DESC LIMIT 12"
     ).fetchall()]
 
-    # Build a sanitised summary for Claude (no names, just financial data)
-    asset_types = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
-    liability_types = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
-    total_assets = sum(a["balance"] for a in accounts if a["type"] in asset_types)
-    total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in liability_types)
+    # Numerical summary only — no account names or personal identifiers.
+    total_assets = sum(a["balance"] for a in accounts if a["type"] in ASSET_TYPES)
+    total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in LIABILITY_TYPES)
     net_worth = total_assets - total_liabilities
 
-    age = 0
     try:
-        from datetime import date as dt_date
         dob = datetime.strptime(profile["dob"], "%Y-%m-%d").date()
-        today = dt_date.today()
+        today = date.today()
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-    except:
+    except Exception:
         age = 45
 
     account_summary = []
     for a in accounts:
         entry = f"- {a['type']}: £{abs(a['balance']):,.0f}"
         if a.get("interest_rate"):
-            entry += f" ({a['interest_rate']}% {'tracker' if a.get('rate_type') == 'tracker' else a.get('rate_type', 'APR')})"
-        if a.get("monthly_contrib") and a["monthly_contrib"] != 0:
+            rt = a.get("rate_type") or "APR"
+            entry += f" ({a['interest_rate']}% {rt})"
+        if a.get("monthly_contrib"):
             entry += f", £{abs(a['monthly_contrib']):,.0f}/month contributions"
         account_summary.append(entry)
 
     pension_annual = profile["gross_salary"] * ((profile["pension_contrib_pct"] + profile["employer_contrib_pct"]) / 100)
-    isa_monthly = sum(a["monthly_contrib"] for a in accounts if a["type"] in ("ISA_SS", "ISA_CASH") and a.get("monthly_contrib"))
+    isa_monthly = sum((a.get("monthly_contrib") or 0) for a in accounts if a["type"] in ISA_TYPES)
 
     snapshot_trend = ""
     if len(snapshots) >= 2:
         latest = snapshots[0]["net_worth"]
         oldest = snapshots[-1]["net_worth"]
-        change = latest - oldest
-        months = len(snapshots)
-        snapshot_trend = f"Net worth trend over last {months} months: £{oldest:,.0f} → £{latest:,.0f} (change: £{change:+,.0f})"
+        snapshot_trend = (
+            f"Net worth trend over last {len(snapshots)} months: "
+            f"£{oldest:,.0f} → £{latest:,.0f} (change: £{latest - oldest:+,.0f})\n"
+        )
 
-    prompt = f"""You are a knowledgeable UK personal finance commentator. Provide a concise, plain-English 
-analysis of this person's financial position. Be direct, practical, and specific. 
-Focus on actionable observations. Do NOT give regulated financial advice — frame as general observations.
-Keep it to 3-4 short paragraphs.
-
-FINANCIAL SNAPSHOT:
-- Age: {age}, target retirement age: {profile['retirement_age']} ({profile['retirement_age'] - age} years)
-- Gross salary: £{profile['gross_salary']:,.0f}
-- Pension contributions: {profile['pension_contrib_pct']}% employee + {profile['employer_contrib_pct']}% employer = £{pension_annual:,.0f}/year
-- ISA monthly contributions: £{isa_monthly:,.0f}
-- Net worth: £{net_worth:,.0f} (assets: £{total_assets:,.0f}, liabilities: £{total_liabilities:,.0f})
-{snapshot_trend}
-
-ACCOUNTS:
-{chr(10).join(account_summary)}
-
-ASSUMPTIONS: {settings['growth_rate']}% growth, {settings['inflation_rate']}% inflation
-
-Give your analysis now. Be encouraging where appropriate but honest about areas for improvement."""
-
-    import urllib.request
-    import urllib.error
-
-    req_data = json.dumps({
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 1000,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=req_data,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-        },
+    user_message = (
+        "FINANCIAL SNAPSHOT:\n"
+        f"- Age: {age}, target retirement age: {profile['retirement_age']} "
+        f"({profile['retirement_age'] - age} years)\n"
+        f"- Gross salary: £{profile['gross_salary']:,.0f}\n"
+        f"- Pension contributions: {profile['pension_contrib_pct']}% employee + "
+        f"{profile['employer_contrib_pct']}% employer = £{pension_annual:,.0f}/year\n"
+        f"- ISA monthly contributions: £{isa_monthly:,.0f}\n"
+        f"- Net worth: £{net_worth:,.0f} (assets: £{total_assets:,.0f}, "
+        f"liabilities: £{total_liabilities:,.0f})\n"
+        f"- Tax region: {settings.get('tax_region', 'scotland')}\n"
+        f"- Assumptions: {settings['growth_rate']}% growth, "
+        f"{settings['inflation_rate']}% inflation\n"
+        f"{snapshot_trend}\n"
+        "ACCOUNTS:\n"
+        + "\n".join(account_summary)
+        + "\n\nGive your analysis now. Be encouraging where appropriate but "
+        "honest about areas for improvement."
     )
 
+    client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            text = ""
-            for block in result.get("content", []):
-                if block.get("type") == "text":
-                    text += block["text"]
-            return jsonify({"commentary": text})
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        return jsonify({"error": f"Claude API error: {e.code}", "detail": body}), 502
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=1024,
+            # Plain text generation — no reasoning needed, keeps latency low.
+            thinking={"type": "disabled"},
+            output_config={"effort": "low"},
+            system=[{
+                "type": "text",
+                "text": _COMMENTARY_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "Anthropic API key is invalid"}), 502
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Anthropic API rate limit reached — try again shortly"}), 503
+    except anthropic.APIStatusError as e:
+        return jsonify({"error": f"Claude API error: {e.status_code}", "detail": str(e)}), 502
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API error: {e}"}), 502
+
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return jsonify({"commentary": text})
 
 
 # ── Salary Sacrifice Calculator ───────────────────────────────────────────────
@@ -806,61 +853,6 @@ def salary_sacrifice_calc():
     proposed_pct = data.get("proposed_contrib_pct", 0)
     employer_pct = data.get("employer_contrib_pct", 0)
     tax_region = data.get("tax_region", "scotland")
-
-    def calc_tax_ni(gross_salary, sacrifice=0, region="scotland"):
-        """2025/26 income tax + NI for Scotland or rUK (England, Wales, NI)."""
-        taxable = gross_salary - sacrifice
-        personal_allowance = 12570
-
-        if region == "scotland":
-            bands = [
-                (14876, 0.19),        # Starter:       £12,571 – £14,876
-                (26561, 0.20),        # Basic:         £14,877 – £26,561
-                (43662, 0.21),        # Intermediate:  £26,562 – £43,662
-                (75000, 0.42),        # Higher:        £43,663 – £75,000
-                (125140, 0.45),       # Advanced:      £75,001 – £125,140
-                (float('inf'), 0.48), # Top:           £125,141+
-            ]
-        else:  # rUK — England, Wales, Northern Ireland
-            bands = [
-                (50270, 0.20),        # Basic:         £12,571 – £50,270
-                (125140, 0.40),       # Higher:        £50,271 – £125,140
-                (float('inf'), 0.45), # Additional:    £125,141+
-            ]
-
-        income_tax = 0
-        remaining = max(0, taxable - personal_allowance)
-        prev_limit = personal_allowance
-        for limit, rate in bands:
-            band_width = limit - prev_limit
-            taxed = min(remaining, band_width)
-            income_tax += taxed * rate
-            remaining -= taxed
-            prev_limit = limit
-            if remaining <= 0:
-                break
-
-        # Employee NI Class 1 — same across all UK regions
-        ni_threshold = 12570
-        upper_limit = 50270
-        ni_earnings = max(0, taxable - ni_threshold)
-        if taxable <= upper_limit:
-            employee_ni = ni_earnings * 0.08
-        else:
-            employee_ni = (upper_limit - ni_threshold) * 0.08 + (taxable - upper_limit) * 0.02
-
-        # Employer NI 2025/26
-        employer_ni = max(0, taxable - 5000) * 0.15
-
-        take_home = taxable - income_tax - employee_ni
-
-        return {
-            "taxable_income": round(taxable),
-            "income_tax": round(income_tax),
-            "employee_ni": round(employee_ni),
-            "employer_ni": round(employer_ni),
-            "take_home": round(take_home),
-        }
 
     current_sacrifice = gross * (current_pct / 100)
     proposed_sacrifice = gross * (proposed_pct / 100)

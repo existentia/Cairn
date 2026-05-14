@@ -53,7 +53,7 @@ Rule-based insights engine (14 rules) covering:
 - **Salary Sacrifice Calculator** — Scottish and rUK income tax bands, NI savings, effective cost, employer NI saving, take-home impact
 - **Debt Payoff Planner** — Avalanche vs snowball comparison with total interest saved
 - **Mortgage Scenarios** — Model different rates, terms, and overpayment strategies
-- **Carry-Forward Pension Calculator** — Editable prior-year inputs for the last 3 tax years (historically correct allowances), calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year
+- **Carry-Forward Pension Calculator** — Auto-rolls to the current tax year using a built-in pension annual-allowance history (2014/15 onwards). Editable prior-year inputs persist locally per tax year; calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year
 - **Bank of England Base Rate** — Live BoE base rate displayed for context
 
 ### Goals Tracker
@@ -86,11 +86,12 @@ cp .env.example .env
 
 Edit `.env`:
 ```
-SECRET_KEY=some-random-string-at-least-32-chars
 ADMIN_USERNAME=username
 ADMIN_PASSWORD=your-secure-password
 ANTHROPIC_API_KEY=sk-ant-...   # Optional: enables AI Copilot
 ```
+
+Changing `ADMIN_PASSWORD` and restarting the container invalidates all existing browser sessions, forcing re-login.
 
 ### 2. Deploy with Docker Compose
 
@@ -103,7 +104,7 @@ Available at `http://<your-server-ip>:8070`
 ### 3. Deploy via Portainer
 
 1. **Stacks** → **Add Stack** → **Repository** (point to your repo)
-2. Add environment variables: `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, optionally `ANTHROPIC_API_KEY`
+2. Add environment variables: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, optionally `ANTHROPIC_API_KEY`
 3. **Deploy the stack**
 
 ---
@@ -117,13 +118,17 @@ cairn/
 ├── entrypoint.sh           # Starts cron + gunicorn
 ├── backend/
 │   ├── app.py              # Flask API + static serving
+│   ├── uk_tax.py           # UK tax constants + calc helpers (2025/26)
+│   ├── snapshots.py        # Shared snapshot writer + idempotent backfill
+│   ├── migrations.py       # Named schema/data migrations
 │   ├── cron_snapshot.py    # Automated monthly snapshots
-│   └── requirements.txt
+│   └── requirements.txt    # Flask + Anthropic SDK + Werkzeug + gunicorn
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx         # Main dashboard UI
 │   │   ├── api.js          # API client
-│   │   ├── advisor.js      # Financial insights engine (14 rules)
+│   │   ├── advisor.js      # Financial insights engine
+│   │   ├── constants.js    # UK tax constants mirror (frontend twin of uk_tax.py)
 │   │   └── main.jsx
 │   ├── index.html
 │   ├── vite.config.js
@@ -131,6 +136,8 @@ cairn/
 └── data/                   # SQLite database (Docker volume)
     └── cairn.db
 ```
+
+Database upgrades are handled by a named-migration framework in `backend/migrations.py`. On every container start, `init_db()` applies any not-yet-run migrations (recorded in a `schema_migrations` table) and runs an idempotent backfill that fills in missing per-category snapshot breakdowns. Existing deployments upgrade in place — no manual SQL.
 
 ---
 
@@ -183,7 +190,9 @@ cd frontend && npm install && npm run dev
 ## Security Notes
 
 - Designed for **local network** use behind your home firewall
-- Passwords are hashed at rest using Werkzeug's PBKDF2 implementation
+- Passwords are hashed at rest using Werkzeug's default (scrypt on modern Pythons); rotating `ADMIN_PASSWORD` and restarting wipes all existing sessions
+- Bearer tokens live in SQLite with a 7-day expiry; expired rows are sample-purged on ~1% of authenticated requests
+- Request bodies are capped at 5 MB
 - If exposing externally, use a reverse proxy with HTTPS and consider Authelia/Authentik
 - AI Copilot sends only numerical summaries to the Claude API — no personal identifiers
 

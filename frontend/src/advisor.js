@@ -8,8 +8,16 @@
  *   priority: 1 (highest) → 5 (lowest)
  */
 
-const ASSET_TYPES = new Set(["PENSION_DC", "SIPP", "PENSION_DB", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"]);
-const LIABILITY_TYPES = new Set(["MORTGAGE", "CREDIT_CARD", "LOAN"]);
+import {
+  ASSET_TYPES, LIABILITY_TYPES, ISA_TYPES, INVESTMENT_PENSION_TYPES,
+  PERSONAL_ALLOWANCE_TAPER_START, PERSONAL_ALLOWANCE_TAPER_END,
+  SCOTLAND_HIGHER_RATE_THRESHOLD, RUK_HIGHER_RATE_THRESHOLD,
+  SCOTLAND_HIGHER_RATE_PCT, RUK_HIGHER_RATE_PCT,
+  NI_RATE_MAIN,
+  STATE_PENSION_AGE, PENSION_ACCESS_AGE, STATE_PENSION_ANNUAL_DEFAULT,
+} from "./constants.js";
+
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 const fmtFull = (v) =>
   `${v < 0 ? "-" : ""}£${Math.abs(v).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -135,7 +143,13 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
   });
 
   // ── Pension headroom ─────────────────────────────────────────────
-  const pensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
+  // Workplace contributions (sal-sac, gross) + per-account monthly contributions
+  // to DC and SIPP pots. SIPP contributions are assumed RAS (net of 20% basic-rate
+  // relief at source), so we gross up; PENSION_DC monthly_contrib is assumed gross.
+  const workplacePensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
+  const dcMonthlyContribs = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+  const sippMonthlyContribsGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
+  const pensionAnnual = workplacePensionAnnual + (dcMonthlyContribs + sippMonthlyContribsGross) * 12;
   const pensionHeadroom = settings.pension_annual_allowance - pensionAnnual;
 
   if (pensionHeadroom > 20000) {
@@ -148,16 +162,16 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
 
   // ── Salary sacrifice opportunity ─────────────────────────────────
   const taxRegion = settings.tax_region || "scotland";
-  const higherRateThreshold = taxRegion === "scotland" ? 43662 : 50270;
-  const higherRatePct = taxRegion === "scotland" ? 42 : 40;
-  const bandDesc = taxRegion === "scotland" ? "Scottish higher-rate band (42%)" : "higher-rate band (40%)";
+  const higherRateThreshold = taxRegion === "scotland" ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
+  const higherRatePct = taxRegion === "scotland" ? SCOTLAND_HIGHER_RATE_PCT : RUK_HIGHER_RATE_PCT;
+  const bandDesc = taxRegion === "scotland" ? `Scottish higher-rate band (${SCOTLAND_HIGHER_RATE_PCT}%)` : `higher-rate band (${RUK_HIGHER_RATE_PCT}%)`;
   if (profile.gross_salary > higherRateThreshold && profile.pension_contrib_pct < 15) {
     const currentSacrifice = profile.gross_salary * (profile.pension_contrib_pct / 100);
     const toThreshold = profile.gross_salary - higherRateThreshold - currentSacrifice;
     if (toThreshold > 0) {
       const extraContrib = Math.min(toThreshold, 20000);
-      // Combined saving: higher-rate income tax + employee NI (8% up to UEL)
-      const combinedSavingRate = (higherRatePct + 8) / 100;
+      // Combined saving: higher-rate income tax + employee NI within UEL
+      const combinedSavingRate = (higherRatePct / 100) + NI_RATE_MAIN;
       const totalSaved = extraContrib * combinedSavingRate;
       const takeHomeReduction = extraContrib - totalSaved;
       insights.push({
@@ -169,24 +183,23 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
   }
 
   // ── Personal allowance taper ─────────────────────────────────────
-  if (profile.gross_salary > 100000) {
-    const taperAmount = Math.min(profile.gross_salary - 100000, 25140);
+  if (profile.gross_salary > PERSONAL_ALLOWANCE_TAPER_START) {
+    const taperAmount = Math.min(profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START, PERSONAL_ALLOWANCE_TAPER_END - PERSONAL_ALLOWANCE_TAPER_START);
     const paLost = Math.round(taperAmount / 2);
     insights.push({
       type: "warning", category: "general", title: "Personal Allowance Taper",
-      detail: `Gross salary of ${fmtFull(profile.gross_salary)} triggers the PA taper — you lose £1 of personal allowance for every £2 over £100,000, creating a ~60% effective marginal rate. You've lost ~${fmtFull(paLost)} of your PA. Salary sacrificing down to £100,000 would fully restore it and could be worth ${fmtFull(Math.round(paLost * 0.42))} in additional tax relief.`,
+      detail: `Gross salary of ${fmtFull(profile.gross_salary)} triggers the PA taper — you lose £1 of personal allowance for every £2 over £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()}, creating a ~60% effective marginal rate. You've lost ~${fmtFull(paLost)} of your PA. Salary sacrificing down to £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()} would fully restore it and could be worth ${fmtFull(Math.round(paLost * (SCOTLAND_HIGHER_RATE_PCT / 100)))} in additional tax relief.`,
       priority: 1,
     });
   }
 
   // ── Pension access age approaching ───────────────────────────────
-  const pensionAccessAge = 57;
-  const yearsToAccess = pensionAccessAge - age;
+  const yearsToAccess = PENSION_ACCESS_AGE - age;
   if (yearsToAccess > 0 && yearsToAccess <= 5) {
-    const totalPensions = accounts.filter((a) => a.type === "PENSION_DC" || a.type === "SIPP").reduce((s, a) => s + a.balance, 0);
+    const totalPensions = accounts.filter((a) => INVESTMENT_PENSION_TYPES.has(a.type)).reduce((s, a) => s + a.balance, 0);
     insights.push({
       type: "info", category: "pension", title: `Pension Access in ${yearsToAccess} Year${yearsToAccess === 1 ? "" : "s"}`,
-      detail: `Your pensions (${fmtFull(totalPensions)} across all pots) become accessible at age 57 (from 2028). Worth reviewing your drawdown strategy now — consider whether to use a tax-free lump sum, phased drawdown, or annuity, and whether to take benefits before or after State Pension age.`,
+      detail: `Your pensions (${fmtFull(totalPensions)} across all pots) become accessible at age ${PENSION_ACCESS_AGE} (from 2028). Worth reviewing your drawdown strategy now — consider whether to use a tax-free lump sum, phased drawdown, or annuity, and whether to take benefits before or after State Pension age.`,
       priority: 3,
     });
   }
@@ -201,12 +214,18 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
   });
 
   // ── Asset concentration ─────────────────────────────────────────
-  if (totalAssets > 0) {
-    const pensionPct = (accounts.filter((a) => a.type === "PENSION_DC" || a.type === "SIPP").reduce((s, a) => s + a.balance, 0) / totalAssets) * 100;
+  // Compare against *liquid/financial* assets only — property skews this
+  // hugely for anyone with a paid-off home, masking real concentration risk.
+  const financialAssets = accounts
+    .filter((a) => ASSET_TYPES.has(a.type) && a.type !== "PROPERTY")
+    .reduce((s, a) => s + a.balance, 0);
+  if (financialAssets > 0) {
+    const pensionBal = accounts.filter((a) => INVESTMENT_PENSION_TYPES.has(a.type)).reduce((s, a) => s + a.balance, 0);
+    const pensionPct = (pensionBal / financialAssets) * 100;
     if (pensionPct > 85) {
       insights.push({
         type: "info", category: "pension", title: "Heavy Pension Concentration",
-        detail: `${Math.round(pensionPct)}% of assets are in pensions (inaccessible until age 57 from 2028). Building ISA holdings alongside gives flexibility for early retirement, unexpected expenses, or drawing down before pension access age.`,
+        detail: `${Math.round(pensionPct)}% of your financial (non-property) assets are in pensions, inaccessible until age ${PENSION_ACCESS_AGE} (from 2028). Building ISA holdings alongside gives flexibility for early retirement, unexpected expenses, or drawing down before pension access age.`,
         priority: 3,
       });
     }
@@ -223,14 +242,16 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
 
   // ── Fixed mortgage nearing end ───────────────────────────────────
   accounts.filter((a) => a.type === "MORTGAGE" && a.rate_type === "fixed" && a.fixed_until).forEach((m) => {
-    const monthsLeft = (new Date(m.fixed_until).getFullYear() - new Date().getFullYear()) * 12 + (new Date(m.fixed_until).getMonth() - new Date().getMonth());
-    if (monthsLeft > 0 && monthsLeft <= 6) {
+    const daysLeft = Math.ceil((new Date(m.fixed_until) - new Date()) / MS_PER_DAY);
+    if (daysLeft <= 0) return;
+    const monthsLeft = Math.max(1, Math.round(daysLeft / 30.44));
+    if (daysLeft <= 183) {
       insights.push({
         type: "warning", category: "mortgage", title: "Mortgage Fix Ending Soon",
-        detail: `Your fixed rate ends in ${monthsLeft} month${monthsLeft > 1 ? "s" : ""}. Start shopping for remortgage deals now — most lenders let you lock in a rate up to 6 months ahead, so you can secure today's rate while remaining protected if rates fall further.`,
+        detail: `Your fixed rate ends in ${daysLeft} days (${monthsLeft} month${monthsLeft === 1 ? "" : "s"}). Start shopping for remortgage deals now — most lenders let you lock in a rate up to 6 months ahead, so you can secure today's rate while remaining protected if rates fall further.`,
         priority: 1,
       });
-    } else if (monthsLeft > 6 && monthsLeft <= 12) {
+    } else if (daysLeft <= 365) {
       insights.push({
         type: "info", category: "mortgage", title: "Mortgage Fix Ending in Under a Year",
         detail: `Fixed rate ends in ${monthsLeft} months (${m.fixed_until}). Worth starting to review remortgage options in the next 2–3 months to give yourself plenty of time.`,
@@ -289,27 +310,40 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
 
   // ── Retirement projection ────────────────────────────────────────
   if (yearsToRetirement > 0 && yearsToRetirement < 30) {
-    const totalPensions = accounts.filter((a) => a.type === "PENSION_DC" || a.type === "SIPP").reduce((s, a) => s + a.balance, 0);
+    const totalPensions = accounts.filter((a) => INVESTMENT_PENSION_TYPES.has(a.type)).reduce((s, a) => s + a.balance, 0);
     const realGrowth = (settings.growth_rate - settings.inflation_rate) / 100;
     let projected = totalPensions;
     for (let i = 0; i < yearsToRetirement * 12; i++) projected = projected * (1 + realGrowth / 12) + pensionAnnual / 12;
-    let projectedISA = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH").reduce((s, a) => s + a.balance, 0);
+    let projectedISA = accounts.filter((a) => ISA_TYPES.has(a.type)).reduce((s, a) => s + a.balance, 0);
     for (let i = 0; i < yearsToRetirement * 12; i++) projectedISA = projectedISA * (1 + realGrowth / 12) + isaMonthly;
 
+    const dbAnnual = accounts.filter((a) => a.type === "PENSION_DB").reduce((s, a) => s + (a.db_annual_pension || 0), 0);
+    const spAnnual = profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT;
     const totalPot = projected + projectedISA;
-    const annualDrawdown = totalPot * 0.04;
+    const potDrawdown = totalPot * 0.04;
+    // Total guaranteed income once State Pension kicks in (and DB if any)
+    const guaranteedAt67 = spAnnual + dbAnnual;
+    const totalIncomeAt67 = potDrawdown + guaranteedAt67;
+
+    const guarBreakdown = dbAnnual > 0
+      ? `${fmtFull(Math.round(spAnnual))}/yr State Pension + ${fmtFull(Math.round(dbAnnual))}/yr DB pension`
+      : `${fmtFull(Math.round(spAnnual))}/yr State Pension`;
+    const spNote = profile.retirement_age < STATE_PENSION_AGE
+      ? `From age ${STATE_PENSION_AGE}: pot drawdown plus ${guarBreakdown} = ~${fmtFull(Math.round(totalIncomeAt67))}/yr (${fmtFull(Math.round(totalIncomeAt67 / 12))}/mo).`
+      : `Plus ${guarBreakdown} from day one = ~${fmtFull(Math.round(totalIncomeAt67))}/yr (${fmtFull(Math.round(totalIncomeAt67 / 12))}/mo).`;
+
     insights.push({
       type: "info", category: "retirement", title: "Retirement Projection",
-      detail: `At age ${profile.retirement_age} (${yearsToRetirement}y): pensions ~${fmtFull(Math.round(projected))}, ISAs ~${fmtFull(Math.round(projectedISA))} (today's money). 4% drawdown supports ~${fmtFull(Math.round(annualDrawdown))}/year (${fmtFull(Math.round(annualDrawdown / 12))}/month).`,
+      detail: `At age ${profile.retirement_age} (${yearsToRetirement}y): pensions ~${fmtFull(Math.round(projected))}, ISAs ~${fmtFull(Math.round(projectedISA))} (today's money). 4% pot drawdown supports ~${fmtFull(Math.round(potDrawdown))}/year. ${spNote}`,
       priority: 2,
     });
 
-    if (profile.retirement_age < 67) {
-      const gapYears = 67 - profile.retirement_age;
-      const spAnnual = profile.state_pension_annual || 11500;
+    if (profile.retirement_age < STATE_PENSION_AGE) {
+      const gapYears = STATE_PENSION_AGE - profile.retirement_age;
+      const bridgeNeeded = (spAnnual + dbAnnual) * gapYears;
       insights.push({
         type: "info", category: "retirement", title: "State Pension Gap",
-        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (67). You'll need ~${fmtFull(Math.round(spAnnual * gapYears))} to bridge that gap (${fmtFull(spAnnual)}/year from pot). Factor this into drawdown planning — use the Drawdown Simulator in Projections.`,
+        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (${STATE_PENSION_AGE}). You'll need ~${fmtFull(Math.round(bridgeNeeded))} from your pot to bridge that gap. Factor this into drawdown planning — use the Drawdown Simulator in Projections.`,
         priority: 2,
       });
     }
@@ -349,11 +383,12 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
     const targetMultiple = targetMultiples[bracket] || 1;
     const target = profile.gross_salary * targetMultiple;
     const ratio = netWorth / target;
+    const targetAgeLabel = bracket >= 60 ? "retirement" : `${bracket + 5}`;
 
     if (ratio < 0.75) {
       insights.push({
         type: "info", category: "general", title: "Net Worth vs Age Benchmark",
-        detail: `Rule of thumb: ${targetMultiple}× salary (${fmtFull(target)}) by age ${bracket + 5 > 60 ? "retirement" : bracket + 5}. Current net worth ${fmtFull(netWorth)} is at ${Math.round(ratio * 100)}% of that target. These are rough guides — your actual number depends on target retirement income, not just age.`,
+        detail: `Rule of thumb: ${targetMultiple}× salary (${fmtFull(target)}) by age ${targetAgeLabel}. Current net worth ${fmtFull(netWorth)} is at ${Math.round(ratio * 100)}% of that target. These are rough guides — your actual number depends on target retirement income, not just age.`,
         priority: 4,
       });
     } else if (ratio >= 1.0) {

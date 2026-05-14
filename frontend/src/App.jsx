@@ -4,7 +4,14 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 import { api } from "./api.js";
-import { generateInsights, ASSET_TYPES, LIABILITY_TYPES, fmtFull, ageFromDob } from "./advisor.js";
+import { generateInsights, fmtFull, ageFromDob } from "./advisor.js";
+import {
+  ASSET_TYPES, LIABILITY_TYPES, INVESTMENT_PENSION_TYPES, ISA_TYPES,
+  PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
+  ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
+  STATE_PENSION_ANNUAL_DEFAULT, PENSION_ACCESS_AGE,
+  getPriorTaxYears,
+} from "./constants.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DESIGN TOKENS
@@ -251,16 +258,23 @@ function LoginScreen({ onLogin }) {
     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 20 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 32, width: "100%", maxWidth: 360 }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 28, color: T.accent, fontWeight: 700, marginBottom: 6 }}>▲</div>
+          <svg width="32" height="40" viewBox="0 0 16 20" fill={T.accent} xmlns="http://www.w3.org/2000/svg" style={{ display: "block", margin: "0 auto 8px" }}>
+            <rect x="5.5" y="0"  width="5"  height="3.5" rx="0.75"/>
+            <rect x="3.5" y="5"  width="9"  height="3.5" rx="0.75"/>
+            <rect x="1.5" y="10" width="13" height="3.5" rx="0.75"/>
+            <rect x="0"   y="15" width="16" height="4"   rx="0.75"/>
+          </svg>
           <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Cairn</h1>
           <p style={{ fontSize: 12, color: T.textDim }}>Sign in to continue</p>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <Field label="Username" value={username} onChange={setUsername} />
-          <Field label="Password" value={password} onChange={setPassword} type="password"
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Wrap each Field so the column-flex parent doesn't apply the Field's
+              `flex: 1 1 200px` to its height and inflate the gap. */}
+          <div><Field label="Username" value={username} onChange={setUsername} /></div>
+          <div><Field label="Password" value={password} onChange={setPassword} type="password"
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit()} /></div>
           {error && <div style={{ color: T.red, fontSize: 12 }}>{error}</div>}
-          <Btn onClick={handleSubmit} style={{ marginTop: 8, padding: "10px 16px" }}>
+          <Btn onClick={handleSubmit} style={{ marginTop: 6, padding: "10px 16px" }}>
             {loading ? "Signing in..." : "Sign In"}
           </Btn>
         </div>
@@ -1166,24 +1180,27 @@ function TaxYearSummary({ profile, accounts, settings }) {
   const taxYearLabel = `${taxYearStartYear}/${String(taxYearStartYear + 1).slice(2)}`;
 
   // ISA
-  const isaMonthly = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH")
+  const isaMonthly = accounts.filter((a) => ISA_TYPES.has(a.type))
     .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
   const isaAnnualRate = isaMonthly * 12;
-  const isaAllowance = settings.isa_allowance || 20000;
+  const isaAllowance = settings.isa_allowance || ISA_ANNUAL_ALLOWANCE;
   const isaRemaining = Math.max(0, isaAllowance - isaAnnualRate);
   const isaUsedPct = Math.min(100, (isaAnnualRate / isaAllowance) * 100);
 
-  // Pension (employee + employer)
-  const pensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
-  const pensionAllowance = settings.pension_annual_allowance || 60000;
+  // Pension AA usage: workplace (sal-sac, gross) + per-account DC monthly contribs
+  // + SIPP monthly contribs grossed up for assumed RAS basic-rate relief.
+  const workplacePensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
+  const dcMonthlyContribs = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+  const sippMonthlyGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
+  const pensionAnnual = workplacePensionAnnual + (dcMonthlyContribs + sippMonthlyGross) * 12;
+  const pensionAllowance = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
   const pensionRemaining = Math.max(0, pensionAllowance - pensionAnnual);
   const pensionUsedPct = Math.min(100, (pensionAnnual / pensionAllowance) * 100);
 
   // Personal allowance
-  const personalAllowance = 12570;
-  const taper = profile.gross_salary > 100000
-    ? Math.min(personalAllowance, Math.floor((profile.gross_salary - 100000) / 2)) : 0;
-  const effectivePA = personalAllowance - taper;
+  const taper = profile.gross_salary > PERSONAL_ALLOWANCE_TAPER_START
+    ? Math.min(PERSONAL_ALLOWANCE, Math.floor((profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START) / 2)) : 0;
+  const effectivePA = PERSONAL_ALLOWANCE - taper;
 
   const Bar = ({ pct, color }) => (
     <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: "hidden", margin: "5px 0" }}>
@@ -1229,7 +1246,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
           <Bar pct={pensionUsedPct} color={pensionUsedPct >= 100 ? T.green : T.blue} />
           <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(Math.round(pensionAnnual))} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(pensionAllowance)}</span></div>
           <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
-            {pensionRemaining > 0 ? `${fmtFull(Math.round(pensionRemaining))} remaining · employee + employer` : "Annual allowance reached ✓"}
+            {pensionRemaining > 0 ? `${fmtFull(Math.round(pensionRemaining))} remaining · workplace + DC + SIPP` : "Annual allowance reached ✓"}
           </div>
         </div>
 
@@ -1258,25 +1275,39 @@ function TaxYearSummary({ profile, accounts, settings }) {
    CARRY-FORWARD PENSION ALLOWANCE CALCULATOR
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// UK pension annual allowances by tax year
-const PENSION_AA_HISTORY = [
-  { label: "2022/23", allowance: 40000 },
-  { label: "2023/24", allowance: 60000 },
-  { label: "2024/25", allowance: 60000 },
-];
-
 function CarryForwardTool({ profile, settings }) {
-  const currentAllowance = settings.pension_annual_allowance || 60000;
+  const currentTaxYear = settings.tax_year || "2025/26";
+  const priorYears = useMemo(() => getPriorTaxYears(currentTaxYear, 3), [currentTaxYear]);
+  const currentAllowance = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
   const currentContrib = Math.round(
     profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100)
   );
 
-  const [priorContribs, setPriorContribs] = useState(
-    Object.fromEntries(PENSION_AA_HISTORY.map((y) => [y.label, 0]))
-  );
+  // Persist user-entered prior-year contributions per tax year so they survive
+  // navigation. Keyed by the current tax year so each year starts fresh.
+  const storageKey = `cairn_carry_forward_${currentTaxYear}`;
+  const [priorContribs, setPriorContribs] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return Object.fromEntries(priorYears.map((y) => [y.label, 0]));
+  });
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(priorContribs)); } catch {}
+  }, [storageKey, priorContribs]);
+  // Re-seed when the set of prior years changes (e.g. tax year rollover)
+  useEffect(() => {
+    setPriorContribs((p) => {
+      const next = { ...p };
+      priorYears.forEach((y) => { if (!(y.label in next)) next[y.label] = 0; });
+      return next;
+    });
+  }, [priorYears]);
+
   const upd = (yr, v) => setPriorContribs((p) => ({ ...p, [yr]: Math.max(0, Number(v)) }));
 
-  const rows = PENSION_AA_HISTORY.map((y) => {
+  const rows = priorYears.map((y) => {
     const contributed = priorContribs[y.label] || 0;
     const unused = Math.max(0, y.allowance - contributed);
     return { ...y, contributed, unused };
@@ -1332,7 +1363,7 @@ function CarryForwardTool({ profile, settings }) {
         </div>
 
         {rows.map((r) => <Row key={r.label} {...r} />)}
-        <Row label="2025/26" allowance={currentAllowance} contributed={currentContrib} unused={Math.max(0, currentAllowance - currentContrib)} highlight />
+        <Row label={currentTaxYear} allowance={currentAllowance} contributed={currentContrib} unused={Math.max(0, currentAllowance - currentContrib)} highlight />
       </div>
 
       {/* Results */}
@@ -1810,7 +1841,7 @@ function FIRECalculator({ profile, accounts, settings, netWorth }) {
           </div>
           <ProgressBar value={(netWorth / coastFIRE) * 100} color={hasCoasted ? T.green : T.purple} />
           <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>
-            Coast FIRE means your pot (at {fmtFull(coastFIRE)}) would grow to your FIRE number by retirement age {profile.retirement_age} with no further contributions.
+            Coast FIRE means your pot (at {fmtFull(coastFIRE)}) would grow to your FIRE number by retirement age {profile.retirement_age} with no further pension/ISA contributions — assuming you still cover day-to-day living costs from earnings until then.
           </div>
         </div>
       </div>

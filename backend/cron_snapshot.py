@@ -1,51 +1,37 @@
 #!/usr/bin/env python3
-"""
-Automated snapshot script — runs inside the Docker container.
-Takes a net worth snapshot by directly accessing the SQLite database.
+"""Automated monthly snapshot — runs inside the Docker container via cron.
 
-Add to crontab or use the Docker healthcheck/entrypoint to run monthly:
+Delegates to backend.snapshots.take_snapshot so that the cron-taken row
+includes the same category breakdown as a manual snapshot, keeping the
+Asset Mix stacked chart populated.
+
+Scheduled by the Dockerfile crontab:
   0 6 1 * * python /app/backend/cron_snapshot.py
 """
 
+import sys
 import sqlite3
-import json
-from datetime import date
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from snapshots import take_snapshot
 
 DB_PATH = Path("/app/data/cairn.db")
 
-ASSET_TYPES = {"PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "CURRENT", "SAVINGS", "PROPERTY"}
-LIABILITY_TYPES = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
 
-
-def take_snapshot():
+def main():
     if not DB_PATH.exists():
         print(f"Database not found at {DB_PATH}")
         return
 
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
-
-    accounts = [dict(r) for r in db.execute("SELECT * FROM accounts").fetchall()]
-
-    total_assets = sum(a["balance"] for a in accounts if a["type"] in ASSET_TYPES)
-    total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in LIABILITY_TYPES)
-    net_worth = total_assets - total_liabilities
-
-    breakdown = {a["name"]: a["balance"] for a in accounts}
-    snapshot_date = date.today().isoformat()
-
-    db.execute("""
-        INSERT OR REPLACE INTO snapshots (date, net_worth, total_assets, total_liabilities, breakdown)
-        VALUES (?, ?, ?, ?, ?)
-    """, (snapshot_date, net_worth, total_assets, total_liabilities, json.dumps(breakdown)))
-
-    db.commit()
-    db.close()
-
-    print(f"Snapshot taken: {snapshot_date} | Net worth: £{net_worth:,.0f} "
-          f"(Assets: £{total_assets:,.0f}, Liabilities: £{total_liabilities:,.0f})")
+    try:
+        snapshot_date, net_worth = take_snapshot(db)
+        print(f"Snapshot taken: {snapshot_date} | Net worth: £{net_worth:,.0f}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
-    take_snapshot()
+    main()
