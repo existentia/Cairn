@@ -67,6 +67,19 @@ export const MARRIAGE_ALLOWANCE_TRANSFER = 1260;
 export const MARRIAGE_ALLOWANCE_SAVING = 252;
 export const MARRIAGE_ALLOWANCE_SPOUSE_MAX = 11310;
 
+// Inheritance Tax (frozen to 2030)
+//   - 40% on estate value over the Nil Rate Band (NRB)
+//   - Residence NRB (RNRB) is an extra slice when main residence passes to
+//     direct descendants. Tapered by £1 per £2 over £2M, nil at £2.35M.
+//   - Married/civil partners can transfer unused NRB + RNRB — up to £1M combined.
+//   - Reduced rate of 36% when 10%+ of the net estate goes to charity.
+export const IHT_NRB = 325000;
+export const IHT_RNRB = 175000;
+export const IHT_RNRB_TAPER_START = 2000000;
+export const IHT_RATE_STANDARD = 0.40;
+export const IHT_RATE_REDUCED = 0.36;
+export const IHT_REDUCED_RATE_CHARITY_PCT = 0.10;
+
 // Pension Annual Allowance taper (2024/25 onwards)
 //   - Triggered when threshold income > £200k AND adjusted income > £260k
 //   - Allowance reduces by £1 for every £2 of adjusted income above £260k

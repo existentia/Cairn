@@ -25,8 +25,13 @@ COPY --from=frontend-build /build/dist ./static/
 # Create data directory
 RUN mkdir -p /app/data
 
-# Set up monthly snapshot cron (1st of each month at 6am)
-RUN echo "0 6 1 * * cd /app && python backend/cron_snapshot.py >> /var/log/cron.log 2>&1" | crontab -
+# Cron jobs:
+#  - Monthly net-worth snapshot (1st of each month, 06:00)
+#  - Daily SQLite backup with rotation (04:00 every day)
+RUN printf '%s\n%s\n' \
+    "0 6 1 * * cd /app && python backend/cron_snapshot.py >> /var/log/cron.log 2>&1" \
+    "0 4 * * * cd /app && python backend/cron_backup.py >> /var/log/cron.log 2>&1" \
+    | crontab -
 
 # Startup script: start cron then app
 COPY entrypoint.sh /app/entrypoint.sh

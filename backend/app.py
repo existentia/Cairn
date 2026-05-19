@@ -6,13 +6,11 @@ Serves the React SPA and provides a REST API backed by SQLite.
 import os
 import sys
 import json
-import random
 import sqlite3
 import hashlib
 import secrets
 from datetime import datetime, date
 from pathlib import Path
-from functools import wraps
 
 from flask import Flask, request, jsonify, send_from_directory, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -26,16 +24,16 @@ if _HERE not in sys.path:
 from uk_tax import (
     ASSET_TYPES, LIABILITY_TYPES,
     INVESTMENT_PENSION_TYPES, ISA_TYPES,
-    calc_tax_ni,
-    SCOTLAND_HIGHER_RATE_THRESHOLD, RUK_HIGHER_RATE_THRESHOLD,
 )
 from snapshots import take_snapshot
 from migrations import run_migrations
+from db_auth import get_db, close_db, require_auth, DB_PATH
+from routes_tools import tools_bp
 
 # ── Config ────────────────────────────────────────────────────────────────────
+# DB_PATH lives in db_auth so blueprints can share it without circular imports.
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
-DB_PATH = DATA_DIR / "cairn.db"
+DATA_DIR = DB_PATH.parent
 STATIC_DIR = BASE_DIR / "static"
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
@@ -52,23 +50,43 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["SECRET_KEY"] = secrets.token_hex(32)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
+# Blueprints — calculator endpoints live in routes_tools (url_prefix /api/tools)
+app.register_blueprint(tools_bp)
+
+
+# ── Security headers ──────────────────────────────────────────────────────────
+# Defence-in-depth for the SPA. CSP allows Google Fonts (the only external
+# resource the app loads) and inline styles (the React tree uses style props
+# heavily — converting to classes would be a large refactor). Connect-src is
+# limited to self so the front-end can only talk to /api on the same origin.
+
+CSP = (
+    "default-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "script-src 'self'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+@app.after_request
+def add_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    return resp
+
 
 # ── Database ──────────────────────────────────────────────────────────────────
+# get_db, close_db, require_auth come from db_auth (shared with blueprints).
 
-def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(str(DB_PATH))
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(exc):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
+app.teardown_appcontext(close_db)
 
 
 def init_db():
@@ -179,6 +197,14 @@ def init_db():
             password_hash TEXT NOT NULL DEFAULT ''
         );
         INSERT OR IGNORE INTO auth (id, password_hash) VALUES (1, '');
+
+        -- Track failed login attempts per IP for rate limiting.
+        CREATE TABLE IF NOT EXISTS auth_failures (
+            ip TEXT PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 0,
+            last_failure TEXT NOT NULL DEFAULT (datetime('now')),
+            locked_until TEXT
+        );
     """)
     db.commit()
 
@@ -213,30 +239,78 @@ def ensure_password_hash():
 
 
 # ── Auth (SQLite-backed tokens — survives across gunicorn workers) ────────────
-
-def require_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-            db = get_db()
-            # Sampled cleanup of expired tokens (~1% of authenticated requests)
-            # so the auth_tokens table doesn't accumulate forever.
-            if random.random() < 0.01:
-                db.execute("DELETE FROM auth_tokens WHERE expires_at < datetime('now')")
-                db.commit()
-            row = db.execute(
-                "SELECT token FROM auth_tokens WHERE token = ? AND expires_at > datetime('now')",
-                (token,)
-            ).fetchone()
-            if row:
-                return f(*args, **kwargs)
-        return jsonify({"error": "Unauthorized"}), 401
-    return decorated
+# require_auth + get_db live in db_auth and are imported at the top.
 
 
 # ── API Routes ────────────────────────────────────────────────────────────────
+
+# ── Rate limiting for /api/auth/login ─────────────────────────────────────────
+# Tracks failed attempts per IP in SQLite (so the limit holds across gunicorn
+# workers and survives restarts). Reset after a quiet hour; lock after 5
+# failures in any 10-minute window for 15 minutes.
+
+AUTH_FAILURE_THRESHOLD = 5            # failures before lock
+AUTH_FAILURE_WINDOW_MIN = 10          # only count failures within this window
+AUTH_LOCKOUT_MIN = 15                 # how long the IP stays locked
+
+
+def _client_ip():
+    """Best-effort client IP. Honour X-Forwarded-For (set by reverse proxies)
+    over remote_addr — useful when behind nginx/caddy."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _check_auth_lock(db, ip):
+    """Returns seconds remaining on lockout, or 0 if not locked."""
+    row = db.execute(
+        "SELECT locked_until FROM auth_failures WHERE ip = ? AND locked_until > datetime('now')",
+        (ip,)
+    ).fetchone()
+    if not row or not row["locked_until"]:
+        return 0
+    # Compute remaining seconds
+    remaining = db.execute(
+        "SELECT CAST((julianday(?) - julianday('now')) * 86400 AS INTEGER) AS s",
+        (row["locked_until"],)
+    ).fetchone()
+    return max(0, remaining["s"] or 0)
+
+
+def _record_auth_failure(db, ip):
+    """Increment failure counter; lock if threshold exceeded inside the window."""
+    row = db.execute("SELECT count, last_failure FROM auth_failures WHERE ip = ?", (ip,)).fetchone()
+    # Reset counter if last failure was outside the rolling window
+    if row:
+        within_window = db.execute(
+            "SELECT (julianday('now') - julianday(?)) * 24 * 60 < ? AS w",
+            (row["last_failure"], AUTH_FAILURE_WINDOW_MIN)
+        ).fetchone()["w"]
+        count = (row["count"] + 1) if within_window else 1
+    else:
+        count = 1
+
+    if count >= AUTH_FAILURE_THRESHOLD:
+        db.execute(
+            "INSERT OR REPLACE INTO auth_failures (ip, count, last_failure, locked_until) "
+            "VALUES (?, ?, datetime('now'), datetime('now', ?))",
+            (ip, count, f"+{AUTH_LOCKOUT_MIN} minutes")
+        )
+    else:
+        db.execute(
+            "INSERT OR REPLACE INTO auth_failures (ip, count, last_failure, locked_until) "
+            "VALUES (?, ?, datetime('now'), NULL)",
+            (ip, count)
+        )
+    db.commit()
+
+
+def _clear_auth_failures(db, ip):
+    db.execute("DELETE FROM auth_failures WHERE ip = ?", (ip,))
+    db.commit()
+
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
@@ -244,8 +318,22 @@ def login():
     username = data.get("username", "")
     password = data.get("password", "")
     db = get_db()
+    ip = _client_ip()
+
+    # Refuse early if this IP is currently locked out
+    locked_for = _check_auth_lock(db, ip)
+    if locked_for > 0:
+        resp = jsonify({
+            "error": f"Too many failed attempts. Try again in {locked_for // 60 + 1} minute(s).",
+            "retry_after": locked_for,
+        })
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(locked_for)
+        return resp
+
     auth_row = db.execute("SELECT password_hash FROM auth WHERE id = 1").fetchone()
     if username == ADMIN_USERNAME and auth_row and check_password_hash(auth_row["password_hash"], password):
+        _clear_auth_failures(db, ip)
         token = secrets.token_hex(32)
         # Clean up expired tokens
         db.execute("DELETE FROM auth_tokens WHERE expires_at < datetime('now')")
@@ -256,6 +344,8 @@ def login():
         )
         db.commit()
         return jsonify({"token": token, "username": username})
+
+    _record_auth_failure(db, ip)
     return jsonify({"error": "Invalid credentials"}), 401
 
 
@@ -463,6 +553,92 @@ def delete_snapshot(snapshot_id):
     db.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
     db.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/snapshots/import-csv", methods=["POST"])
+@require_auth
+def import_snapshots_csv():
+    """Bulk-import historical snapshots from a CSV string.
+
+    Accepts JSON: { "csv": "date,net_worth,total_assets,total_liabilities\\n..." }
+    The header row is required. date and net_worth columns are mandatory;
+    total_assets and total_liabilities are optional and default to net_worth
+    and 0 respectively if absent.
+
+    Uses INSERT OR REPLACE on date, so re-importing overwrites existing rows.
+    """
+    import csv as csv_lib
+    import io
+    from datetime import datetime as _dt
+
+    data = request.get_json() or {}
+    csv_text = (data.get("csv") or "").strip()
+    if not csv_text:
+        return jsonify({"error": "Empty CSV"}), 400
+
+    try:
+        reader = csv_lib.DictReader(io.StringIO(csv_text))
+    except csv_lib.Error as e:
+        return jsonify({"error": f"Could not parse CSV: {e}"}), 400
+
+    if not reader.fieldnames or "date" not in reader.fieldnames or "net_worth" not in reader.fieldnames:
+        return jsonify({"error": "CSV must have at least 'date' and 'net_worth' columns"}), 400
+
+    db = get_db()
+    imported, skipped, errors = 0, 0, []
+
+    for line_no, row in enumerate(reader, start=2):  # line 1 is header
+        raw_date = (row.get("date") or "").strip()
+        raw_nw = (row.get("net_worth") or "").strip()
+        if not raw_date or not raw_nw:
+            skipped += 1
+            continue
+        # Validate date format
+        try:
+            _dt.strptime(raw_date, "%Y-%m-%d")
+        except ValueError:
+            errors.append(f"Line {line_no}: invalid date '{raw_date}' (expected YYYY-MM-DD)")
+            skipped += 1
+            continue
+        try:
+            net_worth = float(raw_nw.replace(",", "").replace("£", ""))
+        except ValueError:
+            errors.append(f"Line {line_no}: invalid net_worth '{raw_nw}'")
+            skipped += 1
+            continue
+
+        # Optional columns
+        def _opt(field, default):
+            v = (row.get(field) or "").strip()
+            if not v:
+                return default
+            try:
+                return float(v.replace(",", "").replace("£", ""))
+            except ValueError:
+                return default
+
+        total_assets = _opt("total_assets", net_worth if net_worth > 0 else 0)
+        total_liabilities = _opt("total_liabilities", 0)
+
+        db.execute(
+            "INSERT OR REPLACE INTO snapshots (date, total_assets, total_liabilities, net_worth) "
+            "VALUES (?, ?, ?, ?)",
+            (raw_date, total_assets, total_liabilities, net_worth)
+        )
+        imported += 1
+
+    db.commit()
+
+    # Best-effort: fill in per-category breakdowns for any imported rows
+    # that match current account data. Old dates won't get categories — fine.
+    from snapshots import backfill_missing_categories
+    backfill_missing_categories(db)
+
+    return jsonify({
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors[:20],  # cap so we don't blow up the response
+    })
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -866,212 +1042,6 @@ def ai_commentary():
     return jsonify({"commentary": text})
 
 
-# ── Salary Sacrifice Calculator ───────────────────────────────────────────────
-
-@app.route("/api/tools/salary-sacrifice", methods=["POST"])
-@require_auth
-def salary_sacrifice_calc():
-    """Calculate the tax/NI savings from salary sacrifice pension contributions."""
-    data = request.get_json()
-    gross = data.get("gross_salary", 0)
-    current_pct = data.get("current_contrib_pct", 0)
-    proposed_pct = data.get("proposed_contrib_pct", 0)
-    employer_pct = data.get("employer_contrib_pct", 0)
-    tax_region = data.get("tax_region", "scotland")
-
-    current_sacrifice = gross * (current_pct / 100)
-    proposed_sacrifice = gross * (proposed_pct / 100)
-    employer_contrib = gross * (employer_pct / 100)
-
-    current = calc_tax_ni(gross, current_sacrifice, tax_region)
-    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region)
-
-    # Cost to take-home vs pension gain
-    take_home_reduction = current["take_home"] - proposed["take_home"]
-    pension_increase = proposed_sacrifice - current_sacrifice
-    employer_ni_saving = current["employer_ni"] - proposed["employer_ni"]
-
-    return jsonify({
-        "current": {
-            **current,
-            "pension_contrib": round(current_sacrifice),
-            "employer_contrib": round(employer_contrib),
-            "total_pension": round(current_sacrifice + employer_contrib),
-        },
-        "proposed": {
-            **proposed,
-            "pension_contrib": round(proposed_sacrifice),
-            "employer_contrib": round(employer_contrib),
-            "employer_ni_saving": round(employer_ni_saving),
-            "total_pension": round(proposed_sacrifice + employer_contrib),
-            "total_pension_with_ni": round(proposed_sacrifice + employer_contrib + employer_ni_saving),
-        },
-        "comparison": {
-            "take_home_reduction_monthly": round(take_home_reduction / 12),
-            "take_home_reduction_annual": round(take_home_reduction),
-            "pension_increase_annual": round(pension_increase),
-            "pension_increase_monthly": round(pension_increase / 12),
-            "employer_ni_saving": round(employer_ni_saving),
-            "effective_cost_ratio": round(take_home_reduction / pension_increase * 100, 1) if pension_increase > 0 else 0,
-            "tax_ni_saved": round(pension_increase - take_home_reduction),
-        },
-    })
-
-
-# ── Bonus Optimiser ───────────────────────────────────────────────────────────
-
-@app.route("/api/tools/bonus-optimiser", methods=["POST"])
-@require_auth
-def bonus_optimiser_calc():
-    """Model receiving an annual bonus as cash vs sacrificing into pension.
-
-    Two scenarios both compared to the no-bonus baseline:
-      - cash:      bonus added to salary, taxed at marginal rates
-      - sacrifice: chosen amount of bonus sacrificed (gross) to pension,
-                   remainder added to salary and taxed
-    """
-    data = request.get_json()
-    gross = data.get("gross_salary", 0)
-    bonus = max(0, data.get("bonus", 0))
-    sacrifice_pct = max(0, min(100, data.get("sacrifice_pct", 100)))
-    tax_region = data.get("tax_region", "scotland")
-
-    sacrifice_amount = bonus * (sacrifice_pct / 100)
-    bonus_kept = bonus - sacrifice_amount
-
-    # Baseline: salary only, no bonus
-    baseline = calc_tax_ni(gross, 0, tax_region)
-    # Cash route: salary + bonus, no sacrifice
-    cash = calc_tax_ni(gross + bonus, 0, tax_region)
-    # Sacrifice route: salary + bonus, sacrifice some of bonus
-    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region)
-
-    cash_extra_take_home = cash["take_home"] - baseline["take_home"]
-    sacrifice_extra_take_home = sacrifice["take_home"] - baseline["take_home"]
-
-    # Tax + NI on the bonus by route
-    cash_tax_ni_paid = bonus - cash_extra_take_home
-    sacrifice_tax_ni_paid = bonus_kept - sacrifice_extra_take_home
-
-    # Total value gained by each route (cash to you + pension)
-    cash_total = cash_extra_take_home
-    sacrifice_total = sacrifice_extra_take_home + sacrifice_amount
-
-    # Marginal effective rate on the cash route
-    marginal_rate = (cash_tax_ni_paid / bonus * 100) if bonus > 0 else 0
-
-    return jsonify({
-        "inputs": {
-            "gross_salary": gross,
-            "bonus": bonus,
-            "sacrifice_pct": sacrifice_pct,
-            "sacrifice_amount": round(sacrifice_amount),
-            "bonus_kept_as_cash": round(bonus_kept),
-        },
-        "cash_route": {
-            "take_home_increase": round(cash_extra_take_home),
-            "tax_ni_paid": round(cash_tax_ni_paid),
-            "pension_increase": 0,
-            "total_value": round(cash_total),
-        },
-        "sacrifice_route": {
-            "take_home_increase": round(sacrifice_extra_take_home),
-            "tax_ni_paid": round(sacrifice_tax_ni_paid),
-            "pension_increase": round(sacrifice_amount),
-            "total_value": round(sacrifice_total),
-        },
-        "comparison": {
-            "extra_in_pocket_today": round(cash_extra_take_home - sacrifice_extra_take_home),
-            "extra_to_pension": round(sacrifice_amount),
-            "tax_ni_saved": round(cash_tax_ni_paid - sacrifice_tax_ni_paid),
-            "total_value_difference": round(sacrifice_total - cash_total),
-            "marginal_rate_pct": round(marginal_rate, 1),
-        },
-    })
-
-
-# ── Debt Payoff Calculator ────────────────────────────────────────────────────
-
-@app.route("/api/tools/debt-payoff", methods=["POST"])
-@require_auth
-def debt_payoff_calc():
-    """Compare avalanche vs snowball debt repayment strategies."""
-    data = request.get_json()
-    debts = data.get("debts", [])
-    extra_monthly = data.get("extra_monthly", 0)
-
-    if not debts:
-        return jsonify({"error": "No debts provided"}), 400
-
-    def simulate(debts_list, extra, strategy="avalanche"):
-        """Simulate month-by-month debt payoff."""
-        active = [{"name": d["name"], "balance": abs(d["balance"]), "rate": d["rate"],
-                    "min_payment": abs(d.get("min_payment", 0))} for d in debts_list]
-        months = 0
-        total_interest = 0
-        total_paid = 0
-        timeline = []
-        max_months = 600  # 50 years cap
-
-        if strategy == "avalanche":
-            active.sort(key=lambda d: -d["rate"])
-        else:  # snowball
-            active.sort(key=lambda d: d["balance"])
-
-        while any(d["balance"] > 0.01 for d in active) and months < max_months:
-            months += 1
-            month_interest = 0
-
-            # Apply interest
-            for d in active:
-                if d["balance"] > 0:
-                    interest = d["balance"] * (d["rate"] / 100 / 12)
-                    d["balance"] += interest
-                    month_interest += interest
-                    total_interest += interest
-
-            # Pay minimums
-            for d in active:
-                if d["balance"] > 0:
-                    payment = min(d["min_payment"], d["balance"])
-                    d["balance"] -= payment
-                    total_paid += payment
-
-            # Apply extra to priority debt
-            remaining_extra = extra
-            for d in active:
-                if d["balance"] > 0 and remaining_extra > 0:
-                    payment = min(remaining_extra, d["balance"])
-                    d["balance"] -= payment
-                    total_paid += payment
-                    remaining_extra -= payment
-
-            total_remaining = sum(d["balance"] for d in active)
-            if months % 3 == 0 or total_remaining < 0.01:
-                timeline.append({"month": months, "remaining": round(total_remaining)})
-
-        return {
-            "months": months,
-            "total_interest": round(total_interest),
-            "total_paid": round(total_paid),
-            "timeline": timeline,
-        }
-
-    avalanche = simulate(debts, extra_monthly, "avalanche")
-    snowball = simulate(debts, extra_monthly, "snowball")
-    minimum_only = simulate(debts, 0, "avalanche")
-
-    return jsonify({
-        "avalanche": avalanche,
-        "snowball": snowball,
-        "minimum_only": minimum_only,
-        "savings_vs_minimum": {
-            "months_saved": minimum_only["months"] - avalanche["months"],
-            "interest_saved": minimum_only["total_interest"] - avalanche["total_interest"],
-        },
-    })
-
-
 # ── BoE Base Rate Data ────────────────────────────────────────────────────────
 
 BOE_RATE_CACHE = {"data": None, "fetched": None}
@@ -1237,95 +1207,6 @@ def boe_base_rate():
 
         return jsonify(result)
 
-
-@app.route("/api/tools/mortgage-scenarios", methods=["POST"])
-@require_auth
-def mortgage_scenarios():
-    """Calculate mortgage payment scenarios at different rates."""
-    data = request.get_json()
-    balance = data.get("balance", 0)
-    current_rate = data.get("current_rate", 5.0)
-    remaining_years = data.get("remaining_years", 20)
-    monthly_payment = data.get("monthly_payment", 0)
-    margin = data.get("tracker_margin", 0.5)
-
-    def calc_monthly_payment(principal, annual_rate, years):
-        if annual_rate <= 0 or years <= 0:
-            return principal / max(years * 12, 1)
-        r = annual_rate / 100 / 12
-        n = years * 12
-        return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
-
-    def calc_total_interest(principal, annual_rate, years):
-        mp = calc_monthly_payment(principal, annual_rate, years)
-        return (mp * years * 12) - principal
-
-    def calc_overpayment(principal, annual_rate, years, extra_monthly):
-        if annual_rate <= 0:
-            return {"months": int(principal / max(extra_monthly + principal / (years * 12), 1)), "interest": 0}
-        r = annual_rate / 100 / 12
-        balance = principal
-        base_payment = calc_monthly_payment(principal, annual_rate, years)
-        total_payment = base_payment + extra_monthly
-        months = 0
-        total_interest = 0
-        while balance > 0.01 and months < years * 12:
-            interest = balance * r
-            total_interest += interest
-            principal_paid = total_payment - interest
-            if principal_paid <= 0:
-                break
-            balance -= principal_paid
-            months += 1
-            if balance < 0:
-                balance = 0
-        return {"months": months, "total_interest": round(total_interest), "saved_months": remaining_years * 12 - months}
-
-    # Current scenario
-    current_monthly = calc_monthly_payment(balance, current_rate, remaining_years)
-
-    # Rate change scenarios
-    scenarios = []
-    for delta in [-1.5, -1.0, -0.5, 0, 0.5, 1.0, 1.5, 2.0]:
-        rate = current_rate + delta
-        if rate < 0.1:
-            continue
-        mp = calc_monthly_payment(balance, rate, remaining_years)
-        ti = calc_total_interest(balance, rate, remaining_years)
-        scenarios.append({
-            "rate": round(rate, 2),
-            "base_rate": round(rate - margin, 2),
-            "monthly_payment": round(mp),
-            "total_interest": round(ti),
-            "diff_monthly": round(mp - current_monthly),
-            "is_current": delta == 0,
-        })
-
-    # Overpayment scenarios
-    overpayments = []
-    for extra in [0, 100, 200, 300, 500]:
-        result = calc_overpayment(balance, current_rate, remaining_years, extra)
-        no_extra = calc_overpayment(balance, current_rate, remaining_years, 0)
-        overpayments.append({
-            "extra_monthly": extra,
-            "months_to_clear": result["months"],
-            "total_interest": result["total_interest"],
-            "interest_saved": no_extra["total_interest"] - result["total_interest"],
-            "time_saved_months": result["saved_months"] - no_extra["saved_months"] if extra > 0 else 0,
-        })
-
-    return jsonify({
-        "current": {
-            "rate": current_rate,
-            "base_rate": round(current_rate - margin, 2),
-            "monthly_payment": round(current_monthly),
-            "total_interest": round(calc_total_interest(balance, current_rate, remaining_years)),
-            "balance": balance,
-            "remaining_years": remaining_years,
-        },
-        "scenarios": scenarios,
-        "overpayments": overpayments,
-    })
 
 
 # ── Serve React SPA ───────────────────────────────────────────────────────────

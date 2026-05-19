@@ -24,6 +24,7 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 
 ### Retirement & Projections
 - Compound growth modelling with real returns (adjustable nominal growth rate and inflation)
+- **Forecast fan chart** — ±1σ envelope around the central projection (lognormal model, 15% equity-like volatility) so the range of outcomes is visible at a glance
 - Drawdown simulator: project how long your pot lasts in retirement, with adjustable retirement age, spending, and State Pension inputs
 - Defined Benefit pension income shown separately and factored into drawdown projections
 
@@ -65,6 +66,7 @@ Rule-based insights engine (23 rules) covering:
 ### Tools
 - **Salary Sacrifice Calculator** — Scottish and rUK income tax bands, NI savings, effective cost, employer NI saving, take-home impact
 - **Bonus Optimiser** — Model a one-off lump sum (annual bonus, RSU vest) as cash vs sacrifice-to-pension; shows marginal rate, take-home impact, and total value gained. Warns when the bonus pushes you into the PA taper or additional-rate band
+- **IHT Estimator** — Inheritance tax calculator using 2025/26 allowances. NRB + RNRB taper (>£2M), transferable allowances for married couples, reduced 36% rate for 10%+ charitable bequests
 - **Debt Payoff Planner** — Avalanche vs snowball comparison with total interest saved
 - **Mortgage Scenarios** — Model different rates, terms, and overpayment strategies
 - **Carry-Forward Pension Calculator** — Auto-rolls to the current tax year using a built-in pension annual-allowance history (2014/15 onwards). Editable prior-year inputs persist locally per tax year; calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year
@@ -84,7 +86,11 @@ Rule-based insights engine (23 rules) covering:
 
 ### Data & Auth
 - Full JSON export and import for backup/migration
+- **CSV snapshot import** — paste historic net-worth data to bootstrap years of pre-Cairn history in one go
+- **Automated daily backups** with rotation — SQLite `.backup()` writes to a configurable host path; keeps the last 14 by default
 - Token-based authentication with hashed passwords (7-day session, designed for local network use)
+- **Login rate-limiting** — 5 failed attempts per IP triggers a 15-minute lockout (SQLite-backed so it holds across gunicorn workers)
+- **Security headers** — strict CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response
 
 ---
 
@@ -103,6 +109,8 @@ Edit `.env`:
 ADMIN_USERNAME=username
 ADMIN_PASSWORD=your-secure-password
 ANTHROPIC_API_KEY=sk-ant-...   # Optional: enables AI Copilot
+BACKUP_DIR=/app/data/backups   # Optional: where cron writes daily backups (default shown)
+BACKUP_RETAIN_DAYS=14          # Optional: how many backups to keep (default 14)
 ```
 
 Changing `ADMIN_PASSWORD` and restarting the container invalidates all existing browser sessions, forcing re-login.
@@ -132,10 +140,13 @@ cairn/
 ├── entrypoint.sh           # Starts cron + gunicorn
 ├── backend/
 │   ├── app.py              # Flask API + static serving
+│   ├── db_auth.py          # Shared get_db / require_auth (used by blueprints)
+│   ├── routes_tools.py     # Calculator endpoints blueprint (/api/tools/*)
 │   ├── uk_tax.py           # UK tax constants + calc helpers (2025/26)
 │   ├── snapshots.py        # Shared snapshot writer + idempotent backfill
 │   ├── migrations.py       # Named schema/data migrations
 │   ├── cron_snapshot.py    # Automated monthly snapshots
+│   ├── cron_backup.py      # Automated daily SQLite backups with rotation
 │   └── requirements.txt    # Flask + Anthropic SDK + Werkzeug + gunicorn
 ├── frontend/
 │   ├── src/

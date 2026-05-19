@@ -23,6 +23,7 @@ import CarryForwardTool from "./tools/CarryForwardTool.jsx";
 import DrawdownSimulator from "./tools/DrawdownSimulator.jsx";
 import SalarySacrificeTool from "./tools/SalarySacrificeTool.jsx";
 import BonusOptimiser from "./tools/BonusOptimiser.jsx";
+import IhtEstimator from "./tools/IhtEstimator.jsx";
 import DebtPayoffTool from "./tools/DebtPayoffTool.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -86,7 +87,8 @@ function LoginScreen({ onLogin }) {
       await api.login(username, password);
       onLogin();
     } catch (e) {
-      setError("Invalid credentials");
+      // apiFetch surfaces the server's error message (e.g. rate-limit text)
+      setError(e.message || "Invalid credentials");
     }
     setLoading(false);
   };
@@ -516,6 +518,11 @@ export default function App() {
   })();
 
   // Projection
+  // Annual real-return volatility used for the ±1σ forecast envelope.
+  // Roughly equity-like (a global tracker has run ~13–17% historically).
+  // Cumulative σ over t years scales with √t under a lognormal model.
+  const FORECAST_SIGMA_ANNUAL = 0.15;
+
   const projData = (() => {
     const pts = [];
     const totalPensions = accounts.filter((a) => a.type === "PENSION_DC" || a.type === "SIPP").reduce((s, a) => s + a.balance, 0);
@@ -525,13 +532,29 @@ export default function App() {
     const rg = (settings.growth_rate - settings.inflation_rate) / 100 / 12;
     let p = totalPensions, i = totalISAs;
     for (let y = 0; y <= Math.min(ytr + 5, 35); y++) {
-      pts.push({ year: new Date().getFullYear() + y, age: age + y, pensions: Math.round(p), isas: Math.round(i), total: Math.round(p + i) });
+      const total = Math.round(p + i);
+      // ±1σ envelope. Year 0 has zero variance; widens with √t.
+      const sigmaT = FORECAST_SIGMA_ANNUAL * Math.sqrt(y);
+      const upper = Math.round(total * Math.exp(sigmaT));
+      const lower = Math.round(total * Math.exp(-sigmaT));
+      pts.push({
+        year: new Date().getFullYear() + y,
+        age: age + y,
+        pensions: Math.round(p),
+        isas: Math.round(i),
+        total,
+        upper,
+        lower,
+      });
       for (let m = 0; m < 12; m++) { p = p * (1 + rg) + mpc; i = i * (1 + rg) + mic; }
     }
     return pts;
   })();
 
-  const retirementPot = projData.find((p) => p.age === profile.retirement_age)?.total || 0;
+  const retirementPotData = projData.find((p) => p.age === profile.retirement_age);
+  const retirementPot = retirementPotData?.total || 0;
+  const retirementPotLow = retirementPotData?.lower || 0;
+  const retirementPotHigh = retirementPotData?.upper || 0;
 
   return (
     <>
@@ -890,9 +913,9 @@ export default function App() {
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Investment Growth Projection</h3>
               <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
-                Real returns ({settings.growth_rate}% growth − {settings.inflation_rate}% inflation) · Today's money
+                Real returns ({settings.growth_rate}% growth − {settings.inflation_rate}% inflation) · Today's money · ±1σ envelope (≈68% confidence) assumes {Math.round(FORECAST_SIGMA_ANNUAL * 100)}% annual volatility under a lognormal model
               </p>
-              <ResponsiveContainer width="100%" height={320}>
+              <ResponsiveContainer width="100%" height={340}>
                 <AreaChart data={projData}>
                   <defs>
                     <linearGradient id="pG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.blue} stopOpacity={0.2} /><stop offset="100%" stopColor={T.blue} stopOpacity={0} /></linearGradient>
@@ -904,6 +927,8 @@ export default function App() {
                   <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
                   <Area type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
                   <Area type="monotone" dataKey="isas" name="ISAs" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
+                  <Line type="monotone" dataKey="upper" name="Upper (+1σ)" stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
+                  <Line type="monotone" dataKey="lower" name="Lower (−1σ)" stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -913,7 +938,7 @@ export default function App() {
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Retirement Readiness</h3>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 {[
-                  { label: "Projected pot at retirement", value: fmtFull(retirementPot), color: T.accent },
+                  { label: "Projected pot at retirement", value: fmtFull(retirementPot), color: T.accent, sub: retirementPotLow && retirementPotHigh ? `±1σ: ${fmtFull(retirementPotLow)} – ${fmtFull(retirementPotHigh)}` : null },
                   { label: "4% drawdown (annual)", value: fmtFull(Math.round(retirementPot * 0.04)), color: T.blue },
                   { label: "4% drawdown (monthly)", value: fmtFull(Math.round(retirementPot * 0.04 / 12)), color: T.green },
                   { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || 11500)}/yr`, color: T.amber },
@@ -961,6 +986,7 @@ export default function App() {
             <ProfileSettings profile={profile} onSave={saveProfile} saving={saving} />
             <AssumptionSettings settings={settings} onSave={saveSettings} saving={saving} />
             <SnapshotHistoryManager snapshots={snapshots} onUpdate={updateSnapshot} onDelete={deleteSnapshot} />
+            <SnapshotCsvImport onImported={async () => { await loadData(); addToast("Snapshots imported", "success"); }} addToast={addToast} />
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Data Management</h3>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1653,6 +1679,94 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
    SNAPSHOT HISTORY MANAGER
    ═══════════════════════════════════════════════════════════════════════════ */
 
+function SnapshotCsvImport({ onImported, addToast }) {
+  const [csv, setCsv] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // Quick client-side preview so the user can see what we'll send before
+  // committing — just counts non-empty lines beyond the header.
+  const preview = (() => {
+    const lines = csv.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return null;
+    const header = lines[0].split(",").map((c) => c.trim().toLowerCase());
+    return {
+      rows: lines.length - 1,
+      header,
+      hasDate: header.includes("date"),
+      hasNetWorth: header.includes("net_worth"),
+    };
+  })();
+
+  const submit = async () => {
+    setLoading(true);
+    setResult(null);
+    try {
+      const r = await api.importSnapshotsCsv(csv);
+      setResult(r);
+      if (r.imported > 0 && onImported) onImported();
+    } catch (e) {
+      addToast(e.message || "CSV import failed", "error");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Import Snapshots (CSV)</h3>
+      <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 12px", lineHeight: 1.6 }}>
+        Bootstrap historic net-worth data from a spreadsheet. CSV must have a header with at minimum <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>date</code> and <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>net_worth</code> columns; <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>total_assets</code> and <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>total_liabilities</code> are optional.
+        Dates use YYYY-MM-DD. Re-importing a date overwrites the existing row.
+      </p>
+      <textarea
+        value={csv}
+        onChange={(e) => setCsv(e.target.value)}
+        placeholder={`date,net_worth,total_assets,total_liabilities\n2024-01-01,125000,250000,125000\n2024-02-01,128500,253000,124500\n...`}
+        rows={8}
+        spellCheck={false}
+        style={{
+          width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6,
+          color: T.text, padding: 10, fontSize: 12, fontFamily: T.mono, outline: "none", resize: "vertical",
+        }}
+      />
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        {preview && (
+          <div style={{ fontSize: 11.5, color: preview.hasDate && preview.hasNetWorth ? T.textMuted : T.amber }}>
+            {preview.rows} row{preview.rows !== 1 ? "s" : ""} detected · header: <span style={{ fontFamily: T.mono }}>{preview.header.join(", ")}</span>
+            {!preview.hasDate && " · missing 'date' column"}
+            {!preview.hasNetWorth && " · missing 'net_worth' column"}
+          </div>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <Btn variant="secondary" onClick={() => { setCsv(""); setResult(null); }}>Clear</Btn>
+          <Btn onClick={submit} style={{ opacity: !csv || loading ? 0.5 : 1, pointerEvents: !csv || loading ? "none" : "auto" }}>
+            {loading ? "Importing..." : "Import"}
+          </Btn>
+        </div>
+      </div>
+      {result && (
+        <div style={{
+          marginTop: 12, padding: "10px 12px",
+          background: T.bg, borderRadius: T.radius,
+          border: `1px solid ${result.errors.length > 0 ? T.amber + "55" : T.green + "55"}`,
+          borderLeft: `3px solid ${result.errors.length > 0 ? T.amber : T.green}`,
+          fontSize: 12, color: T.textMuted, lineHeight: 1.6,
+        }}>
+          Imported <strong style={{ color: T.green }}>{result.imported}</strong> snapshot{result.imported !== 1 ? "s" : ""}
+          {result.skipped > 0 && <> · skipped <strong style={{ color: T.amber }}>{result.skipped}</strong></>}
+          {result.errors.length > 0 && (
+            <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+              {result.errors.map((err, i) => (
+                <li key={i} style={{ color: T.red, fontSize: 11.5 }}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -1948,12 +2062,14 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
         <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
         <Tab label="Bonus Optimiser" active={activeTool === "bonus"} onClick={() => setActiveTool("bonus")} />
+        <Tab label="IHT Estimator" active={activeTool === "iht"} onClick={() => setActiveTool("iht")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
       {activeTool === "fire" && <FIRECalculator profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />}
       {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "bonus" && <BonusOptimiser profile={profile} settings={settings} />}
+      {activeTool === "iht" && <IhtEstimator netWorth={netWorth} accounts={accounts} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>
   );

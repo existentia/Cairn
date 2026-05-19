@@ -83,6 +83,7 @@ export const api = {
   takeSnapshot: (date) => apiFetch("/snapshots", { method: "POST", body: JSON.stringify({ date }) }),
   updateSnapshot: (id, data) => apiFetch(`/snapshots/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteSnapshot: (id) => apiFetch(`/snapshots/${id}`, { method: "DELETE" }),
+  importSnapshotsCsv: (csv) => apiFetch("/snapshots/import-csv", { method: "POST", body: JSON.stringify({ csv }) }),
 
   // Settings
   getSettings: () => apiFetch("/settings"),
@@ -98,6 +99,7 @@ export const api = {
   // Tools
   salarySacrifice: (data) => apiFetch("/tools/salary-sacrifice", { method: "POST", body: JSON.stringify(data) }),
   bonusOptimiser: (data) => apiFetch("/tools/bonus-optimiser", { method: "POST", body: JSON.stringify(data) }),
+  ihtEstimator: (data) => apiFetch("/tools/iht-estimator", { method: "POST", body: JSON.stringify(data) }),
   debtPayoff: (data) => apiFetch("/tools/debt-payoff", { method: "POST", body: JSON.stringify(data) }),
 
   // Goals
