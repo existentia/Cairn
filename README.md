@@ -9,6 +9,7 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 ### Net Worth Tracking
 - Record monthly snapshots and chart progress over time
 - Edit or delete historical snapshots
+- **Estimated contributions overlay** on the main net worth chart — dashed line showing cumulative investment contributions so the gap reveals market growth at a glance
 - Stacked area chart showing net worth split by asset category (pensions, ISAs, property, cash, debts) over time
 - **Annual cashflow Sankey** — visualises where your salary goes (tax/NI → sacrifice → take-home → ISA/savings/mortgage/spending), live with Scottish / rUK tax bands
 - Net worth target line on the main chart
@@ -33,13 +34,15 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Three scenarios: Lean FIRE (5% SWR, 70% expenses), Regular FIRE (4%), Fat FIRE (3.5%, 130% expenses)
 
 ### Financial Advisor
-Rule-based insights engine (21 rules) covering:
+Rule-based insights engine (23 rules) covering:
 - ISA allowance usage and days remaining in the tax year
 - **LISA bonus headroom** — flags missed 25% government bonus when under 50
 - **CGT allowance** — bed-and-ISA prompt when GIA unrealised gains exceed £3k
 - Pension headroom vs annual allowance
 - **Workplace match underused** — flags when your contribution sits below the employer match threshold
 - **Annual Allowance taper** — alerts high earners (>£200k) when the pension AA taper may be in play
+- **HICBC** — High Income Child Benefit Charge taper warning with sacrifice-to-£60k recommendation
+- **Marriage Allowance** — flags £252/yr opportunity when one partner is a non-taxpayer
 - Salary sacrifice optimisation (with Scottish / rUK tax band awareness)
 - **Salary band cliff alerts** — actionable warnings just above higher-rate and additional-rate thresholds
 - Debt prioritisation (high-interest first)
@@ -61,6 +64,7 @@ Rule-based insights engine (21 rules) covering:
 
 ### Tools
 - **Salary Sacrifice Calculator** — Scottish and rUK income tax bands, NI savings, effective cost, employer NI saving, take-home impact
+- **Bonus Optimiser** — Model a one-off lump sum (annual bonus, RSU vest) as cash vs sacrifice-to-pension; shows marginal rate, take-home impact, and total value gained. Warns when the bonus pushes you into the PA taper or additional-rate band
 - **Debt Payoff Planner** — Avalanche vs snowball comparison with total interest saved
 - **Mortgage Scenarios** — Model different rates, terms, and overpayment strategies
 - **Carry-Forward Pension Calculator** — Auto-rolls to the current tax year using a built-in pension annual-allowance history (2014/15 onwards). Editable prior-year inputs persist locally per tax year; calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year

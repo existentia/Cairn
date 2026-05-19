@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
-  PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis,
+  PieChart, Pie, Cell, AreaChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
   Sankey, Layer, Rectangle,
 } from "recharts";
@@ -22,6 +22,7 @@ import FIRECalculator from "./tools/FIRECalculator.jsx";
 import CarryForwardTool from "./tools/CarryForwardTool.jsx";
 import DrawdownSimulator from "./tools/DrawdownSimulator.jsx";
 import SalarySacrificeTool from "./tools/SalarySacrificeTool.jsx";
+import BonusOptimiser from "./tools/BonusOptimiser.jsx";
 import DebtPayoffTool from "./tools/DebtPayoffTool.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -588,34 +589,64 @@ export default function App() {
         {/* ── OVERVIEW ─────────────────────────────────────────── */}
         {tab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Net Worth Over Time</h3>
-              {snapshots.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <AreaChart data={snapshots}>
-                    <defs><linearGradient id="nwG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.accent} stopOpacity={0.3} /><stop offset="100%" stopColor={T.accent} stopOpacity={0} /></linearGradient></defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
-                    <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-                    <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
-                    <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
-                    {settings.net_worth_target > 0 && (
-                      <ReferenceLine
-                        y={settings.net_worth_target}
-                        stroke={T.amber}
-                        strokeDasharray="5 4"
-                        strokeWidth={1.5}
-                        label={{ value: `Target: ${fmt(settings.net_worth_target)}${settings.net_worth_target_date ? ` by ${settings.net_worth_target_date.slice(0, 7)}` : ""}`, fill: T.amber, fontSize: 10, position: "insideTopLeft" }}
-                      />
+            {(() => {
+              // Enrich snapshots with estimated cumulative contributions across
+              // investment accounts (PENSION_DC, SIPP, ISA_*, GIA). Worked
+              // backwards from current total_contributed using current monthly
+              // contribution rates — an estimate that assumes constant rates
+              // historically. Only rendered when ≥1 account has contributions tracked.
+              const investTypes = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "ISA_LISA", "GIA"]);
+              const investAccts = accounts.filter((a) => investTypes.has(a.type));
+              const currentContrib = investAccts.reduce((s, a) => s + (a.total_contributed || 0), 0);
+              const monthlyContrib = investAccts.reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+              const hasContribData = currentContrib > 0;
+              const now = Date.now();
+              const enriched = !hasContribData ? snapshots : snapshots.map((s) => {
+                const monthsBack = Math.max(0, (now - new Date(s.date).getTime()) / (1000 * 60 * 60 * 24 * 30.44));
+                const est = Math.max(0, currentContrib - monthsBack * monthlyContrib);
+                return { ...s, est_contributions: Math.round(est) };
+              });
+              return (
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                    <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Net Worth Over Time</h3>
+                    {hasContribData && (
+                      <div style={{ fontSize: 10.5, color: T.textDim }}>
+                        Dashed line: estimated cumulative investment contributions ({fmtFull(currentContrib)} to date)
+                      </div>
                     )}
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div style={{ padding: 40, textAlign: "center", color: T.textDim, fontSize: 13 }}>
-                  No snapshots yet. Click <strong>📸 Snapshot</strong> to record your current net worth.
+                  </div>
+                  {snapshots.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <AreaChart data={enriched}>
+                        <defs><linearGradient id="nwG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.accent} stopOpacity={0.3} /><stop offset="100%" stopColor={T.accent} stopOpacity={0} /></linearGradient></defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                        <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                        <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
+                        <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
+                        {hasContribData && (
+                          <Line type="monotone" dataKey="est_contributions" stroke={T.purple} strokeDasharray="4 3" strokeWidth={1.5} dot={false} name="Est. contributions" />
+                        )}
+                        {settings.net_worth_target > 0 && (
+                          <ReferenceLine
+                            y={settings.net_worth_target}
+                            stroke={T.amber}
+                            strokeDasharray="5 4"
+                            strokeWidth={1.5}
+                            label={{ value: `Target: ${fmt(settings.net_worth_target)}${settings.net_worth_target_date ? ` by ${settings.net_worth_target_date.slice(0, 7)}` : ""}`, fill: T.amber, fontSize: 10, position: "insideTopLeft" }}
+                          />
+                        )}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ padding: 40, textAlign: "center", color: T.textDim, fontSize: 13 }}>
+                      No snapshots yet. Click <strong>📸 Snapshot</strong> to record your current net worth.
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* Stacked history chart — shown once we have snapshots with category data */}
             {(() => {
@@ -992,6 +1023,15 @@ function ProfileSettings({ profile, onSave, saving }) {
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
           <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
             The maximum employee % your employer will match. Leave at 0 if you don't have a match scheme. Advisor will warn if you're contributing below this threshold.
+          </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="Children Claiming CB For" type="number" value={form.children_count ?? 0} onChange={(v) => upd("children_count", v)} small />
+        <Field label="Spouse Income (annual)" type="number" value={form.spouse_income ?? 0} onChange={(v) => upd("spouse_income", v)} prefix="£" />
+        <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
+          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+            Used by the advisor: children for HICBC alerts (£60k–£80k), spouse income for Marriage Allowance opportunities. Leave both at 0 if not applicable.
           </span>
         </div>
       </div>
@@ -1901,11 +1941,13 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
         <Tab label="FIRE Calculator" active={activeTool === "fire"} onClick={() => setActiveTool("fire")} />
         <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
+        <Tab label="Bonus Optimiser" active={activeTool === "bonus"} onClick={() => setActiveTool("bonus")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
       {activeTool === "fire" && <FIRECalculator profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />}
       {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
+      {activeTool === "bonus" && <BonusOptimiser profile={profile} settings={settings} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>
   );

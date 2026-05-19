@@ -77,6 +77,24 @@ CGT_ANNUAL_ALLOWANCE = 3000
 CGT_BASIC_RATE_PCT = 18
 CGT_HIGHER_RATE_PCT = 24
 
+# High Income Child Benefit Charge (2024/25 onwards)
+#   - Triggered above £60k adjusted net income
+#   - 1% of CB clawed back per £200 over £60k
+#   - Fully tapered at £80k
+HICBC_THRESHOLD_START = 60000
+HICBC_THRESHOLD_END = 80000
+# Child Benefit weekly rates (2025/26)
+CB_WEEKLY_FIRST_CHILD = 26.05
+CB_WEEKLY_ADDITIONAL_CHILD = 17.25
+
+# Marriage Allowance
+#   - Non-taxpayer spouse transfers £1,260 of personal allowance to basic-rate partner
+#   - Worth up to £252/year (£1,260 × 20%)
+#   - Spouse must be earning under £12,570 (some flexibility down to £11,310 transferable safely)
+MARRIAGE_ALLOWANCE_TRANSFER = 1260
+MARRIAGE_ALLOWANCE_SAVING = 252
+MARRIAGE_ALLOWANCE_SPOUSE_MAX = 11310  # Safe spouse-income ceiling for full benefit
+
 # Pension Annual Allowance taper (2024/25 onwards)
 #   - Triggered when threshold income > £200k AND adjusted income > £260k
 #   - Allowance reduces by £1 for every £2 of adjusted income above £260k

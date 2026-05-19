@@ -19,6 +19,11 @@ import {
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT,
   LISA_OPEN_MAX_AGE, LISA_CONTRIB_MAX_AGE,
   CGT_ANNUAL_ALLOWANCE, CGT_BASIC_RATE_PCT, CGT_HIGHER_RATE_PCT,
+  HICBC_THRESHOLD_START, HICBC_THRESHOLD_END,
+  CB_WEEKLY_FIRST_CHILD, CB_WEEKLY_ADDITIONAL_CHILD,
+  MARRIAGE_ALLOWANCE_TRANSFER, MARRIAGE_ALLOWANCE_SAVING,
+  MARRIAGE_ALLOWANCE_SPOUSE_MAX,
+  PERSONAL_ALLOWANCE,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -296,6 +301,54 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
       insights.push({
         type: "info", category: "pension", title: "Annual Allowance Taper Threshold",
         detail: `Salary above £${AA_TAPER_THRESHOLD_INCOME.toLocaleString()} is the threshold for the Pension AA taper. The taper only bites once adjusted income (incl. employer pension contributions) exceeds £${AA_TAPER_ADJUSTED_INCOME.toLocaleString()}. Worth checking whether any bonus or RSU vest could push you over.`,
+        priority: 3,
+      });
+    }
+  }
+
+  // ── HICBC: High Income Child Benefit Charge ──────────────────────
+  // £60k-£80k taper, 1% of CB clawed back per £200 over £60k.
+  // Pension sacrifice reduces adjusted net income, dragging you below the
+  // threshold and restoring the full Child Benefit. Often the single most
+  // valuable sal-sac case for parents.
+  const childrenCount = profile.children_count || 0;
+  if (childrenCount > 0 && profile.gross_salary > HICBC_THRESHOLD_START) {
+    // Annual Child Benefit at 2025/26 rates
+    const cbAnnual = Math.round(
+      CB_WEEKLY_FIRST_CHILD * 52
+      + CB_WEEKLY_ADDITIONAL_CHILD * 52 * Math.max(0, childrenCount - 1)
+    );
+    if (profile.gross_salary >= HICBC_THRESHOLD_END) {
+      insights.push({
+        type: "warning", category: "tax", title: "HICBC Fully Clawed Back",
+        detail: `Income above £${HICBC_THRESHOLD_END.toLocaleString()} means 100% of your ~${fmtFull(cbAnnual)}/yr Child Benefit is reclaimed via the High Income Child Benefit Charge. Salary-sacrificing down toward £${HICBC_THRESHOLD_START.toLocaleString()} would restore the benefit pound-for-pound, often at a net cost (after tax + NI relief) of ~40-60% of the sacrifice amount.`,
+        priority: 1,
+      });
+    } else {
+      // Partial taper — percentage clawed back
+      const excess = profile.gross_salary - HICBC_THRESHOLD_START;
+      const taperPct = Math.min(100, Math.floor(excess / 200));
+      const clawedBack = Math.round(cbAnnual * taperPct / 100);
+      const sacrificeToZero = Math.round(excess);
+      insights.push({
+        type: "warning", category: "tax", title: `HICBC: ${taperPct}% of CB Lost`,
+        detail: `Income £${profile.gross_salary.toLocaleString()} triggers a partial HICBC — about ${fmtFull(clawedBack)} of your ${fmtFull(cbAnnual)}/yr Child Benefit is reclaimed. Salary-sacrificing ${fmtFull(sacrificeToZero)} into pension would drop you below £${HICBC_THRESHOLD_START.toLocaleString()} and restore the full benefit — effective relief often exceeds 60% once tax + NI + restored CB are combined.`,
+        priority: 1,
+      });
+    }
+  }
+
+  // ── Marriage Allowance opportunity ───────────────────────────────
+  // Non-taxpayer spouse can transfer £1,260 of personal allowance to a
+  // basic-rate partner, saving £252/year. Fires when conditions look right.
+  if (profile.spouse_income > 0 && profile.spouse_income <= MARRIAGE_ALLOWANCE_SPOUSE_MAX) {
+    const isScot = settings.tax_region === "scotland";
+    const basicCeiling = isScot ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
+    // Only worth it if main earner is in the basic/intermediate band (not above higher-rate threshold)
+    if (profile.gross_salary > PERSONAL_ALLOWANCE && profile.gross_salary < basicCeiling) {
+      insights.push({
+        type: "opportunity", category: "tax", title: "Marriage Allowance Available",
+        detail: `Your spouse's income (${fmtFull(profile.spouse_income)}) is below the personal allowance, so they can transfer £${MARRIAGE_ALLOWANCE_TRANSFER.toLocaleString()} of unused PA to you — worth up to £${MARRIAGE_ALLOWANCE_SAVING}/year in tax saved. Apply once at gov.uk/marriage-allowance and it auto-renews each year. Can also be backdated up to 4 prior tax years if you've been eligible.`,
         priority: 3,
       });
     }

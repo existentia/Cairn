@@ -87,6 +87,8 @@ def init_db():
             tax_code TEXT NOT NULL DEFAULT '1257L',
             state_pension_annual REAL NOT NULL DEFAULT 11500,
             employer_match_max_pct REAL NOT NULL DEFAULT 0,
+            children_count INTEGER NOT NULL DEFAULT 0,
+            spouse_income REAL NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -293,6 +295,7 @@ def update_profile():
             name = ?, dob = ?, retirement_age = ?, gross_salary = ?,
             pension_contrib_pct = ?, employer_contrib_pct = ?, tax_code = ?,
             state_pension_annual = ?, employer_match_max_pct = ?,
+            children_count = ?, spouse_income = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
@@ -302,6 +305,7 @@ def update_profile():
         data.get("tax_code", "1257L"),
         data.get("state_pension_annual", 11500),
         data.get("employer_match_max_pct", 0),
+        data.get("children_count", 0), data.get("spouse_income", 0),
     ))
     db.commit()
     return jsonify({"ok": True})
@@ -652,12 +656,14 @@ def import_data():
             UPDATE profile SET name=?, dob=?, retirement_age=?, gross_salary=?,
                 pension_contrib_pct=?, employer_contrib_pct=?, tax_code=?,
                 state_pension_annual=?, employer_match_max_pct=?,
+                children_count=?, spouse_income=?,
                 updated_at=datetime('now')
             WHERE id = 1
         """, (p.get("name",""), p.get("dob","1980-01-01"), p.get("retirement_age",57),
               p.get("gross_salary",0), p.get("pension_contrib_pct",0),
               p.get("employer_contrib_pct",0), p.get("tax_code","1257L"),
-              p.get("state_pension_annual",11500), p.get("employer_match_max_pct",0)))
+              p.get("state_pension_annual",11500), p.get("employer_match_max_pct",0),
+              p.get("children_count",0), p.get("spouse_income",0)))
 
     if "accounts" in data:
         db.execute("DELETE FROM accounts")
@@ -908,6 +914,78 @@ def salary_sacrifice_calc():
             "employer_ni_saving": round(employer_ni_saving),
             "effective_cost_ratio": round(take_home_reduction / pension_increase * 100, 1) if pension_increase > 0 else 0,
             "tax_ni_saved": round(pension_increase - take_home_reduction),
+        },
+    })
+
+
+# ── Bonus Optimiser ───────────────────────────────────────────────────────────
+
+@app.route("/api/tools/bonus-optimiser", methods=["POST"])
+@require_auth
+def bonus_optimiser_calc():
+    """Model receiving an annual bonus as cash vs sacrificing into pension.
+
+    Two scenarios both compared to the no-bonus baseline:
+      - cash:      bonus added to salary, taxed at marginal rates
+      - sacrifice: chosen amount of bonus sacrificed (gross) to pension,
+                   remainder added to salary and taxed
+    """
+    data = request.get_json()
+    gross = data.get("gross_salary", 0)
+    bonus = max(0, data.get("bonus", 0))
+    sacrifice_pct = max(0, min(100, data.get("sacrifice_pct", 100)))
+    tax_region = data.get("tax_region", "scotland")
+
+    sacrifice_amount = bonus * (sacrifice_pct / 100)
+    bonus_kept = bonus - sacrifice_amount
+
+    # Baseline: salary only, no bonus
+    baseline = calc_tax_ni(gross, 0, tax_region)
+    # Cash route: salary + bonus, no sacrifice
+    cash = calc_tax_ni(gross + bonus, 0, tax_region)
+    # Sacrifice route: salary + bonus, sacrifice some of bonus
+    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region)
+
+    cash_extra_take_home = cash["take_home"] - baseline["take_home"]
+    sacrifice_extra_take_home = sacrifice["take_home"] - baseline["take_home"]
+
+    # Tax + NI on the bonus by route
+    cash_tax_ni_paid = bonus - cash_extra_take_home
+    sacrifice_tax_ni_paid = bonus_kept - sacrifice_extra_take_home
+
+    # Total value gained by each route (cash to you + pension)
+    cash_total = cash_extra_take_home
+    sacrifice_total = sacrifice_extra_take_home + sacrifice_amount
+
+    # Marginal effective rate on the cash route
+    marginal_rate = (cash_tax_ni_paid / bonus * 100) if bonus > 0 else 0
+
+    return jsonify({
+        "inputs": {
+            "gross_salary": gross,
+            "bonus": bonus,
+            "sacrifice_pct": sacrifice_pct,
+            "sacrifice_amount": round(sacrifice_amount),
+            "bonus_kept_as_cash": round(bonus_kept),
+        },
+        "cash_route": {
+            "take_home_increase": round(cash_extra_take_home),
+            "tax_ni_paid": round(cash_tax_ni_paid),
+            "pension_increase": 0,
+            "total_value": round(cash_total),
+        },
+        "sacrifice_route": {
+            "take_home_increase": round(sacrifice_extra_take_home),
+            "tax_ni_paid": round(sacrifice_tax_ni_paid),
+            "pension_increase": round(sacrifice_amount),
+            "total_value": round(sacrifice_total),
+        },
+        "comparison": {
+            "extra_in_pocket_today": round(cash_extra_take_home - sacrifice_extra_take_home),
+            "extra_to_pension": round(sacrifice_amount),
+            "tax_ni_saved": round(cash_tax_ni_paid - sacrifice_tax_ni_paid),
+            "total_value_difference": round(sacrifice_total - cash_total),
+            "marginal_rate_pct": round(marginal_rate, 1),
         },
     })
 

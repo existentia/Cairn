@@ -97,6 +97,7 @@ export const api = {
 
   // Tools
   salarySacrifice: (data) => apiFetch("/tools/salary-sacrifice", { method: "POST", body: JSON.stringify(data) }),
+  bonusOptimiser: (data) => apiFetch("/tools/bonus-optimiser", { method: "POST", body: JSON.stringify(data) }),
   debtPayoff: (data) => apiFetch("/tools/debt-payoff", { method: "POST", body: JSON.stringify(data) }),
 
   // Goals

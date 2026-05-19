@@ -61,6 +61,10 @@ MIGRATIONS = [
      _alter_add_column("profile", "employer_match_max_pct REAL NOT NULL DEFAULT 0")),
     ("011_accounts_add_unrealised_gain",
      _alter_add_column("accounts", "unrealised_gain REAL NOT NULL DEFAULT 0")),
+    ("012_profile_add_children_count",
+     _alter_add_column("profile", "children_count INTEGER NOT NULL DEFAULT 0")),
+    ("013_profile_add_spouse_income",
+     _alter_add_column("profile", "spouse_income REAL NOT NULL DEFAULT 0")),
 ]
 
 
