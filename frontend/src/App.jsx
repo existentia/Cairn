@@ -1414,12 +1414,15 @@ function CashflowSankey({ profile, accounts, settings }) {
           </p>
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={320}>
+      <ResponsiveContainer width="100%" height={360}>
         <Sankey
           data={data}
           node={<SankeyNode />}
           nodePadding={28}
-          margin={{ top: 10, right: 140, bottom: 10, left: 60 }}
+          // Bottom margin holds the value-label line that sits below each
+          // node's centre — without ~28-30px of headroom, the lowest node's
+          // value gets clipped against the SVG edge.
+          margin={{ top: 18, right: 140, bottom: 30, left: 60 }}
           link={{ stroke: T.accent, strokeOpacity: 0.18 }}
         >
           <Tooltip
