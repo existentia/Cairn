@@ -10,11 +10,12 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Record monthly snapshots and chart progress over time
 - Edit or delete historical snapshots
 - Stacked area chart showing net worth split by asset category (pensions, ISAs, property, cash, debts) over time
+- **Annual cashflow Sankey** — visualises where your salary goes (tax/NI → sacrifice → take-home → ISA/savings/mortgage/spending), live with Scottish / rUK tax bands
 - Net worth target line on the main chart
 - Automated monthly snapshot via cron job
 
 ### Account Management
-- **Account types:** Current Account, Savings, Cash ISA, Stocks & Shares ISA, DC/Workplace Pension, SIPP, Defined Benefit / Final Salary Pension (CETV + guaranteed annual income), Property, Mortgage, Credit Card, Loan, Other
+- **Account types:** Current Account, Savings, Cash ISA, Stocks & Shares ISA, **Lifetime ISA** (with £4k sub-allowance + 25% bonus tracking), **General Investment Account (GIA)** with unrealised-gain tracking for CGT planning, DC/Workplace Pension, SIPP, Defined Benefit / Final Salary Pension (CETV + guaranteed annual income), Property, Mortgage, Credit Card, Loan, Other
 - Search, filter by type, and reorder accounts via drag-and-drop
 - Track `total_contributed` for investment accounts to calculate real returns
 - Portfolio Performance panel showing gain/loss and return % per account
@@ -32,22 +33,28 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Three scenarios: Lean FIRE (5% SWR, 70% expenses), Regular FIRE (4%), Fat FIRE (3.5%, 130% expenses)
 
 ### Financial Advisor
-Rule-based insights engine (16 rules) covering:
+Rule-based insights engine (21 rules) covering:
 - ISA allowance usage and days remaining in the tax year
+- **LISA bonus headroom** — flags missed 25% government bonus when under 50
+- **CGT allowance** — bed-and-ISA prompt when GIA unrealised gains exceed £3k
 - Pension headroom vs annual allowance
 - **Workplace match underused** — flags when your contribution sits below the employer match threshold
 - **Annual Allowance taper** — alerts high earners (>£200k) when the pension AA taper may be in play
 - Salary sacrifice optimisation (with Scottish / rUK tax band awareness)
+- **Salary band cliff alerts** — actionable warnings just above higher-rate and additional-rate thresholds
 - Debt prioritisation (high-interest first)
 - Emergency fund adequacy
+- **Fixed-savings maturity reminder** — heads-up before fixed-rate bonds roll over to dismal rates
 - Mortgage alerts and overpayment opportunity
+- **Variable mortgage drift vs BoE** — flags tracker/SVR rates running materially above market margin
 - Net worth velocity (month-on-month momentum)
 - Pension carry-forward opportunity
-- Insights are filterable by category (Savings, Debt, Pension, Property, Tax)
+- Insights are filterable by category (Savings, Debt, Pension, Tax, etc.)
 
 ### Tax Year Summary
 - Live tax-year panel showing:
   - ISA contributions vs £20,000 annual allowance
+  - LISA sub-allowance (£4k) usage + expected government bonus, if you have one
   - Pension contributions (employee + employer) vs annual allowance
   - Personal allowance status with taper warning above £100,000 salary
   - Days remaining in the current tax year

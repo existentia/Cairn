@@ -59,6 +59,8 @@ MIGRATIONS = [
     ("009_backfill_snapshot_categories", _m_backfill_snapshot_categories),
     ("010_profile_add_employer_match_max_pct",
      _alter_add_column("profile", "employer_match_max_pct REAL NOT NULL DEFAULT 0")),
+    ("011_accounts_add_unrealised_gain",
+     _alter_add_column("accounts", "unrealised_gain REAL NOT NULL DEFAULT 0")),
 ]
 
 

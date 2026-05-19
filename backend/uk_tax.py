@@ -8,13 +8,16 @@ frontend/src/constants.js — keep in sync.
 
 ASSET_TYPES = {
     "PENSION_DC", "SIPP", "PENSION_DB",
-    "ISA_SS", "ISA_CASH",
+    "ISA_SS", "ISA_CASH", "ISA_LISA",
+    "GIA",
     "CURRENT", "SAVINGS",
     "PROPERTY",
 }
 LIABILITY_TYPES = {"MORTGAGE", "CREDIT_CARD", "LOAN"}
 INVESTMENT_PENSION_TYPES = {"PENSION_DC", "SIPP"}
-ISA_TYPES = {"ISA_SS", "ISA_CASH"}
+# LISA counts toward the £20k overall ISA allowance, so include it here.
+# GIA is a taxable wrapper — not an ISA.
+ISA_TYPES = {"ISA_SS", "ISA_CASH", "ISA_LISA"}
 CASH_TYPES = {"CURRENT", "SAVINGS"}
 
 # ── Income tax — 2025/26 ──────────────────────────────────────────────────────
@@ -58,6 +61,21 @@ NI_RATE_EMPLOYER = 0.15
 
 ISA_ANNUAL_ALLOWANCE = 20000
 PENSION_ANNUAL_ALLOWANCE = 60000
+
+# Lifetime ISA — £4k/year sub-allowance (counts within overall £20k ISA limit).
+# Government adds 25% bonus on contributions. Can open between 18 and 40,
+# contribute until 50, access from 60 (or earlier for first home).
+# Unauthorised withdrawals incur a 25% penalty.
+LISA_ANNUAL_ALLOWANCE = 4000
+LISA_BONUS_PCT = 25
+LISA_OPEN_MAX_AGE = 40
+LISA_CONTRIB_MAX_AGE = 50
+LISA_ACCESS_AGE = 60
+
+# Capital Gains Tax annual exempt amount (2024/25 onwards)
+CGT_ANNUAL_ALLOWANCE = 3000
+CGT_BASIC_RATE_PCT = 18
+CGT_HIGHER_RATE_PCT = 24
 
 # Pension Annual Allowance taper (2024/25 onwards)
 #   - Triggered when threshold income > £200k AND adjusted income > £260k

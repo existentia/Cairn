@@ -104,6 +104,7 @@ def init_db():
             term_end_date TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             total_contributed REAL NOT NULL DEFAULT 0,
+            unrealised_gain REAL NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -324,15 +325,17 @@ def create_account():
     cursor = db.execute("""
         INSERT INTO accounts (name, type, balance, provider, contributing,
             monthly_contrib, interest_rate, rate_type, fixed_until,
-            term_end_date, notes, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            term_end_date, notes, sort_order, total_contributed,
+            db_annual_pension, unrealised_gain)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data["name"], data["type"], data.get("balance", 0),
         data.get("provider", ""), data.get("contributing", False),
         data.get("monthly_contrib", 0), data.get("interest_rate", 0),
         data.get("rate_type", ""), data.get("fixed_until", ""),
         data.get("term_end_date", ""), data.get("notes", ""),
-        data.get("sort_order", 0),
+        data.get("sort_order", 0), data.get("total_contributed", 0),
+        data.get("db_annual_pension", 0), data.get("unrealised_gain", 0),
     ))
     db.commit()
     return jsonify({"id": cursor.lastrowid}), 201
@@ -348,7 +351,8 @@ def update_account(account_id):
     allowed = [
         "name", "type", "balance", "provider", "contributing",
         "monthly_contrib", "interest_rate", "rate_type", "fixed_until",
-        "term_end_date", "notes", "sort_order", "total_contributed", "db_annual_pension",
+        "term_end_date", "notes", "sort_order", "total_contributed",
+        "db_annual_pension", "unrealised_gain",
     ]
     for key in allowed:
         if key in data:
@@ -587,9 +591,18 @@ def get_dashboard():
 
     goals = [dict(r) for r in db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()]
 
+    # Best-effort current BoE base rate (used by advisor's mortgage-drift rule).
+    # Returns whatever's already cached; if nothing's been fetched yet the rule
+    # silently skips. The /api/rates/boe-base-rate endpoint populates the cache
+    # when the user visits the Rates tab (and the cron snapshot warms it too).
+    boe_rate = None
+    if BOE_RATE_CACHE.get("data"):
+        boe_rate = BOE_RATE_CACHE["data"].get("current_rate")
+
     return jsonify({
         "profile": profile,
         "accounts": accounts,
+        "boe_rate": boe_rate,
         "settings": settings,
         "snapshots": snapshots,
         "goals": goals,
@@ -652,14 +665,16 @@ def import_data():
             db.execute("""
                 INSERT INTO accounts (name,type,balance,provider,contributing,
                     monthly_contrib,interest_rate,rate_type,fixed_until,
-                    term_end_date,notes,sort_order,total_contributed,db_annual_pension)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    term_end_date,notes,sort_order,total_contributed,
+                    db_annual_pension,unrealised_gain)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (a["name"], a["type"], a.get("balance",0), a.get("provider",""),
                   a.get("contributing",0), a.get("monthly_contrib",0),
                   a.get("interest_rate",0), a.get("rate_type",""),
                   a.get("fixed_until",""), a.get("term_end_date",""),
                   a.get("notes",""), a.get("sort_order",0),
-                  a.get("total_contributed",0), a.get("db_annual_pension",0)))
+                  a.get("total_contributed",0), a.get("db_annual_pension",0),
+                  a.get("unrealised_gain",0)))
 
     if "settings" in data:
         s = data["settings"]

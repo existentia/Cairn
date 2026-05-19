@@ -64,7 +64,8 @@ export const T = { ...DARK_THEME };
 
 export const ACCOUNT_LABELS = {
   PENSION_DC: "DC Pension", SIPP: "SIPP", PENSION_DB: "DB / Final Salary Pension",
-  ISA_SS: "Stocks & Shares ISA", ISA_CASH: "Cash ISA",
+  ISA_SS: "Stocks & Shares ISA", ISA_CASH: "Cash ISA", ISA_LISA: "Lifetime ISA",
+  GIA: "General Investment Account",
   CURRENT: "Current Account", SAVINGS: "Savings Account", PROPERTY: "Property",
   MORTGAGE: "Mortgage", CREDIT_CARD: "Credit Card", LOAN: "Loan",
 };

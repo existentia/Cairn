@@ -3,14 +3,17 @@
 
 export const ASSET_TYPES = new Set([
   "PENSION_DC", "SIPP", "PENSION_DB",
-  "ISA_SS", "ISA_CASH",
+  "ISA_SS", "ISA_CASH", "ISA_LISA",
+  "GIA",
   "CURRENT", "SAVINGS",
   "PROPERTY",
 ]);
 
 export const LIABILITY_TYPES = new Set(["MORTGAGE", "CREDIT_CARD", "LOAN"]);
 export const INVESTMENT_PENSION_TYPES = new Set(["PENSION_DC", "SIPP"]);
-export const ISA_TYPES = new Set(["ISA_SS", "ISA_CASH"]);
+// LISA counts toward the £20k overall ISA allowance, so include it here.
+// GIA is a taxable wrapper — not an ISA.
+export const ISA_TYPES = new Set(["ISA_SS", "ISA_CASH", "ISA_LISA"]);
 export const CASH_TYPES = new Set(["CURRENT", "SAVINGS"]);
 
 // Income tax 2025/26
@@ -30,6 +33,21 @@ export const NI_RATE_MAIN = 0.08;
 // Allowances
 export const ISA_ANNUAL_ALLOWANCE = 20000;
 export const PENSION_ANNUAL_ALLOWANCE = 60000;
+
+// Lifetime ISA — £4k/year sub-allowance (counts within overall £20k ISA limit).
+// Government adds 25% bonus on contributions. Can open between 18 and 40,
+// contribute until 50, access from 60 (or earlier for first home).
+// Unauthorised withdrawals incur a 25% penalty.
+export const LISA_ANNUAL_ALLOWANCE = 4000;
+export const LISA_BONUS_PCT = 25;
+export const LISA_OPEN_MAX_AGE = 40;
+export const LISA_CONTRIB_MAX_AGE = 50;
+export const LISA_ACCESS_AGE = 60;
+
+// Capital Gains Tax annual exempt amount (2024/25 onwards)
+export const CGT_ANNUAL_ALLOWANCE = 3000;
+export const CGT_BASIC_RATE_PCT = 18;
+export const CGT_HIGHER_RATE_PCT = 24;
 
 // Pension Annual Allowance taper (2024/25 onwards)
 //   - Triggered when threshold income > £200k AND adjusted income > £260k

@@ -16,6 +16,9 @@ import {
   NI_RATE_MAIN,
   STATE_PENSION_AGE, PENSION_ACCESS_AGE, STATE_PENSION_ANNUAL_DEFAULT,
   AA_TAPER_THRESHOLD_INCOME, AA_TAPER_ADJUSTED_INCOME, AA_TAPER_MIN_ALLOWANCE,
+  LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT,
+  LISA_OPEN_MAX_AGE, LISA_CONTRIB_MAX_AGE,
+  CGT_ANNUAL_ALLOWANCE, CGT_BASIC_RATE_PCT, CGT_HIGHER_RATE_PCT,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -38,7 +41,7 @@ function daysUntilTaxYearEnd() {
   return Math.ceil((taxYearEnd - now) / (1000 * 60 * 60 * 24));
 }
 
-export function generateInsights({ profile, accounts, settings, snapshots }) {
+export function generateInsights({ profile, accounts, settings, snapshots, boe_rate }) {
   const insights = [];
   if (!profile || !accounts || !settings) return insights;
 
@@ -75,6 +78,49 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
       type: "warning", category: "isa", title: `ISA Deadline: ${daysLeft} Days Remaining`,
       detail: `Tax year ends 5 April. ${fmtFull(isaRemaining)} unused ISA allowance — use it or lose it. That's ${fmtFull(Math.round(isaRemaining / monthsLeft))}/month for ${monthsLeft} month${monthsLeft > 1 ? "s" : ""}, or a lump sum.`,
       priority: 1,
+    });
+  }
+
+  // ── Lifetime ISA opportunities ───────────────────────────────────
+  // 25% government bonus on contributions up to £4k/year — easily the best
+  // guaranteed return available to UK savers under 50.
+  const lisaAccounts = accounts.filter((a) => a.type === "ISA_LISA");
+  const hasLISA = lisaAccounts.length > 0;
+  const lisaMonthly = lisaAccounts.reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+  const lisaAnnual = lisaMonthly * 12;
+  const lisaRemaining = LISA_ANNUAL_ALLOWANCE - lisaAnnual;
+
+  if (hasLISA && age < LISA_CONTRIB_MAX_AGE && lisaRemaining > 500) {
+    const bonusMissed = Math.round(lisaRemaining * (LISA_BONUS_PCT / 100));
+    insights.push({
+      type: "opportunity", category: "isa", title: "LISA Bonus Headroom",
+      detail: `Using ${fmtFull(lisaAnnual)} of your £${LISA_ANNUAL_ALLOWANCE.toLocaleString()} LISA allowance — ${fmtFull(lisaRemaining)} remaining this tax year. Every £1 you add gets a 25p government bonus, so filling this would unlock an extra ${fmtFull(bonusMissed)}/year in free money. Bonus paid monthly into the account, available until age ${LISA_CONTRIB_MAX_AGE}.`,
+      priority: 2,
+    });
+  } else if (!hasLISA && age >= 18 && age < LISA_OPEN_MAX_AGE) {
+    insights.push({
+      type: "info", category: "isa", title: "LISA Worth Considering",
+      detail: `Lifetime ISAs let you contribute up to £${LISA_ANNUAL_ALLOWANCE.toLocaleString()}/year (within your overall £20k ISA limit) for a 25% government bonus — up to £1,000/year free. Designed for first home or retirement (accessible from age 60). You can only open one before age ${LISA_OPEN_MAX_AGE} and contribute until age ${LISA_CONTRIB_MAX_AGE}. Unauthorised withdrawals incur a 25% penalty, so only for genuine long-term/property savings.`,
+      priority: 4,
+    });
+  }
+
+  // ── GIA: CGT allowance opportunity ───────────────────────────────
+  // Outside of an ISA wrapper, gains over the annual exempt amount attract CGT.
+  // "Bed & ISA" — selling within the GIA and immediately re-buying inside an
+  // ISA — uses the allowance and shelters future growth.
+  const giaAccounts = accounts.filter((a) => a.type === "GIA");
+  const totalGiaGain = giaAccounts.reduce((s, a) => s + (a.unrealised_gain || 0), 0);
+  if (totalGiaGain > CGT_ANNUAL_ALLOWANCE) {
+    const rate = (settings.tax_region === "scotland"
+      ? profile.gross_salary > SCOTLAND_HIGHER_RATE_THRESHOLD
+      : profile.gross_salary > RUK_HIGHER_RATE_THRESHOLD)
+      ? CGT_HIGHER_RATE_PCT : CGT_BASIC_RATE_PCT;
+    const realisable = Math.min(totalGiaGain, CGT_ANNUAL_ALLOWANCE);
+    insights.push({
+      type: "opportunity", category: "tax", title: "Use Your CGT Allowance",
+      detail: `Your GIA holdings show ${fmtFull(totalGiaGain)} in unrealised gains. The 2025/26 CGT annual exempt amount is £${CGT_ANNUAL_ALLOWANCE.toLocaleString()} — gains above that are taxed at ${rate}% at your marginal rate. Consider realising ${fmtFull(realisable)} of gains this tax year (sell, then re-buy inside your S&S ISA — "bed & ISA") to use the allowance and shelter future growth tax-free. Allowance cannot be carried forward.`,
+      priority: 2,
     });
   }
 
@@ -140,6 +186,23 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
       type: "opportunity", category: "savings", title: `Low Interest Rate: ${a.name}`,
       detail: `${fmtFull(a.balance)} earning ${rate}% — well below current easy-access rates of 4%+. Switching to a top easy-access account could earn an extra ~${fmtFull(Math.round(a.balance * 0.04))}/year. Compare at moneysavingexpert.com/savings.`,
       priority: 3,
+    });
+  });
+
+  // ── Fixed-savings maturity reminder ──────────────────────────────
+  // Fixed-rate bonds tend to default to dismal rates on rollover, so the
+  // months leading up to maturity are the right time to start shopping.
+  accounts.filter((a) => a.type === "SAVINGS" && a.term_end_date && a.balance > 1000).forEach((a) => {
+    const days = Math.ceil((new Date(a.term_end_date) - new Date()) / MS_PER_DAY);
+    if (days <= 0 || days > 90) return;
+    const monthsLeft = Math.max(1, Math.round(days / 30.44));
+    const rate = a.interest_rate || 0;
+    insights.push({
+      type: days <= 30 ? "warning" : "opportunity",
+      category: "savings",
+      title: `Fixed Savings Maturing: ${a.name}`,
+      detail: `${fmtFull(a.balance)} at ${rate}% matures in ${days} day${days === 1 ? "" : "s"} (${monthsLeft} month${monthsLeft === 1 ? "" : "s"}, ${a.term_end_date}). Banks typically roll these over into low-rate easy-access products by default — start comparing fixed bond / easy-access rates now to lock in the best replacement.`,
+      priority: days <= 30 ? 1 : 2,
     });
   });
 
@@ -238,6 +301,36 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
     }
   }
 
+  // ── Salary band cliff alerts ─────────────────────────────────────
+  // Each rate band introduces a step-change in marginal rate. Salary sacrifice
+  // is most valuable when it pulls you below one of these cliffs.
+  const isScotland = settings.tax_region === "scotland";
+  const higherCliff = isScotland ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
+  const additionalCliff = 125140; // Both regions: top rate / additional rate threshold
+
+  // Within £5k OVER the higher-rate cliff: a small sacrifice pulls you back below
+  if (profile.gross_salary > higherCliff && profile.gross_salary <= higherCliff + 5000) {
+    const sacrificeNeeded = profile.gross_salary - higherCliff;
+    const higherPct = isScotland ? SCOTLAND_HIGHER_RATE_PCT : RUK_HIGHER_RATE_PCT;
+    const basicPct = isScotland ? 21 : 20; // Scottish intermediate vs rUK basic
+    const savedPerPound = (higherPct - basicPct) / 100 + NI_RATE_MAIN;
+    insights.push({
+      type: "opportunity", category: "tax", title: "Just Over the Higher-Rate Threshold",
+      detail: `Salary of ${fmtFull(profile.gross_salary)} sits just above the £${higherCliff.toLocaleString()} ${isScotland ? "Scottish higher" : "higher"}-rate threshold (${higherPct}%). A pension sacrifice of ${fmtFull(sacrificeNeeded)} would drop you back into the lower band, saving ${higherPct - basicPct}p + NI per £1 sacrificed — about ${fmtFull(Math.round(sacrificeNeeded * savedPerPound))}/year in tax relief. Plus the full amount lands in your pension.`,
+      priority: 2,
+    });
+  }
+
+  // Above the additional-rate cliff: top marginal rate sal-sac is gold
+  if (profile.gross_salary > additionalCliff) {
+    const topPct = isScotland ? 48 : 45; // Scottish top vs rUK additional
+    insights.push({
+      type: "opportunity", category: "tax", title: "Additional-Rate Taxpayer",
+      detail: `Salary above £${additionalCliff.toLocaleString()} means you pay ${topPct}% marginal income tax on every £ over that. Each £1 of pension sacrifice saves ${topPct}p in income tax plus 2% NI — the highest effective relief available. Combined with the £100k Personal Allowance taper and £260k AA taper, very high earners benefit most from carry-forward + maxed pension contributions. Worth modelling in the Salary Sacrifice tool.`,
+      priority: 2,
+    });
+  }
+
   // ── Pension access age approaching ───────────────────────────────
   const yearsToAccess = PENSION_ACCESS_AGE - age;
   if (yearsToAccess > 0 && yearsToAccess <= 5) {
@@ -284,6 +377,27 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
       priority: 3,
     });
   });
+
+  // ── Variable rate drift vs BoE base rate ─────────────────────────
+  // Trackers usually run at BoE + 0.5–1.5%. SVRs are typically much higher
+  // (2–4% above base) and are rarely the best deal. Only fires when we have
+  // a BoE rate to compare against (populated when the Rates tab is visited
+  // or after the cron snapshot warms the cache).
+  if (boe_rate != null) {
+    accounts.filter((a) => a.type === "MORTGAGE" && a.interest_rate > 0 && (a.rate_type === "tracker" || a.rate_type === "svr")).forEach((m) => {
+      const margin = m.interest_rate - boe_rate;
+      const expectedMargin = m.rate_type === "tracker" ? 1.5 : 2.5;
+      if (margin > expectedMargin) {
+        const yearlyExtra = Math.round(Math.abs(m.balance) * ((margin - expectedMargin) / 100));
+        insights.push({
+          type: "opportunity", category: "mortgage",
+          title: `${m.rate_type === "svr" ? "SVR" : "Tracker"} Rate Above Market: ${m.name}`,
+          detail: `Your ${m.rate_type === "svr" ? "SVR" : "tracker"} is at ${m.interest_rate}% — that's BoE+${margin.toFixed(2)}% (BoE base rate ${boe_rate}%). Competitive ${m.rate_type === "svr" ? "fixed-rate deals" : "trackers"} typically run at BoE+${expectedMargin}% or below. Switching could save ~${fmtFull(yearlyExtra)}/year in interest. Worth getting a remortgage quote.`,
+          priority: 2,
+        });
+      }
+    });
+  }
 
   // ── Fixed mortgage nearing end ───────────────────────────────────
   accounts.filter((a) => a.type === "MORTGAGE" && a.rate_type === "fixed" && a.fixed_until).forEach((m) => {

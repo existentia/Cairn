@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
+  Sankey, Layer, Rectangle,
 } from "recharts";
 import { api } from "./api.js";
 import { generateInsights, fmtFull, ageFromDob } from "./advisor.js";
@@ -9,6 +10,7 @@ import {
   ASSET_TYPES, LIABILITY_TYPES, ISA_TYPES,
   PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
   ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
+  LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT, LISA_CONTRIB_MAX_AGE,
 } from "./constants.js";
 
 import {
@@ -166,11 +168,14 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
             <Field label={form.type === "PROPERTY" ? "Estimated Value" : form.type === "PENSION_DB" ? "Transfer Value (CETV)" : "Balance"} type="number" value={form.balance} onChange={(v) => upd("balance", v)} prefix="£" />
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-            {(form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "SAVINGS") && (
+            {(form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "ISA_LISA" || form.type === "GIA" || form.type === "SAVINGS") && (
               <Field label="Monthly Contrib" type="number" value={form.monthly_contrib || 0} onChange={(v) => upd("monthly_contrib", v)} prefix="£" small />
             )}
-            {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
+            {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "ISA_LISA" || form.type === "GIA") && (
               <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+            )}
+            {form.type === "GIA" && (
+              <Field label="Unrealised Gain" type="number" value={form.unrealised_gain || 0} onChange={(v) => upd("unrealised_gain", v)} prefix="£" small />
             )}
             {form.type === "PENSION_DB" && (
               <Field label="Annual Pension at Retirement" type="number" value={form.db_annual_pension || 0} onChange={(v) => upd("db_annual_pension", v)} prefix="£" small />
@@ -206,6 +211,7 @@ function AccountForm({ onSave, onCancel }) {
     name: "", type: "PENSION_DC", balance: 0, provider: "", contributing: false,
     monthly_contrib: 0, interest_rate: 0, rate_type: "", fixed_until: "",
     term_end_date: "", notes: "", total_contributed: 0, db_annual_pension: 0,
+    unrealised_gain: 0,
   });
   const isLiab = LIABILITY_TYPES.has(form.type);
   const upd = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -227,8 +233,11 @@ function AccountForm({ onSave, onCancel }) {
             onChange={(v) => upd("monthly_contrib", isLiab ? -v : v)} prefix="£" small />
         )}
         {isLiab && <Field label="Interest Rate" type="number" value={form.interest_rate} onChange={(v) => upd("interest_rate", v)} suffix="%" small />}
-        {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH") && (
+        {(form.type === "PENSION_DC" || form.type === "SIPP" || form.type === "ISA_SS" || form.type === "ISA_CASH" || form.type === "ISA_LISA" || form.type === "GIA") && (
           <Field label="Total Contributed" type="number" value={form.total_contributed || 0} onChange={(v) => upd("total_contributed", v)} prefix="£" small />
+        )}
+        {form.type === "GIA" && (
+          <Field label="Unrealised Gain" type="number" value={form.unrealised_gain || 0} onChange={(v) => upd("unrealised_gain", v)} prefix="£" small />
         )}
         {form.type === "PENSION_DB" && (
           <Field label="Annual Pension at Retirement" type="number" value={form.db_annual_pension || 0} onChange={(v) => upd("db_annual_pension", v)} prefix="£" small />
@@ -286,6 +295,14 @@ export default function App() {
     try {
       const d = await api.getDashboard();
       setData(d);
+      // Lazy-fetch BoE rate in the background if dashboard didn't carry one
+      // (cache cold). Once it returns we merge into data so the mortgage-drift
+      // advisor rule starts firing without needing a manual refresh.
+      if (d.boe_rate == null) {
+        api.boeBaseRate()
+          .then((r) => setData((prev) => prev ? { ...prev, boe_rate: r.current_rate } : prev))
+          .catch(() => {});
+      }
     } catch (e) {
       console.error("Failed to load data", e);
     }
@@ -685,9 +702,12 @@ export default function App() {
               </div>
             </div>
 
+            {/* Annual cashflow Sankey */}
+            <CashflowSankey profile={profile} accounts={accounts} settings={settings} />
+
             {/* Portfolio Performance — only shown when ≥1 investment account has contributions tracked */}
             {(() => {
-              const investTypes = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH"]);
+              const investTypes = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "ISA_LISA", "GIA"]);
               const investAccounts = assets.filter((a) => investTypes.has(a.type) && (a.total_contributed || 0) > 0);
               if (investAccounts.length === 0) return null;
               return (
@@ -1059,6 +1079,13 @@ function TaxYearSummary({ profile, accounts, settings }) {
   const isaRemaining = Math.max(0, isaAllowance - isaAnnualRate);
   const isaUsedPct = Math.min(100, (isaAnnualRate / isaAllowance) * 100);
 
+  // LISA sub-allowance (counts within overall ISA limit but has its own £4k cap)
+  const lisaAccounts = accounts.filter((a) => a.type === "ISA_LISA");
+  const hasLISA = lisaAccounts.length > 0;
+  const lisaAnnualRate = lisaAccounts.reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 12;
+  const lisaUsedPct = Math.min(100, (lisaAnnualRate / LISA_ANNUAL_ALLOWANCE) * 100);
+  const lisaBonus = Math.round(lisaAnnualRate * (LISA_BONUS_PCT / 100));
+
   // Pension AA usage: workplace (sal-sac, gross) + per-account DC monthly contribs
   // + SIPP monthly contribs grossed up for assumed RAS basic-rate relief.
   const workplacePensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
@@ -1138,6 +1165,21 @@ function TaxYearSummary({ profile, accounts, settings }) {
             </>
           )}
         </div>
+
+        {/* LISA sub-allowance — only shown if user has a LISA */}
+        {hasLISA && (
+          <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>LISA Sub-Allowance</span>
+              <span style={{ fontSize: 11, fontFamily: T.mono, color: lisaUsedPct >= 100 ? T.green : T.purple }}>{lisaUsedPct.toFixed(0)}%</span>
+            </div>
+            <Bar pct={lisaUsedPct} color={lisaUsedPct >= 100 ? T.green : T.purple} />
+            <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(lisaAnnualRate)} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(LISA_ANNUAL_ALLOWANCE)}</span></div>
+            <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+              {lisaBonus > 0 ? `Expected bonus: ${fmtFull(lisaBonus)}/yr` : "25% gov bonus on contributions"} · until age {LISA_CONTRIB_MAX_AGE}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1156,7 +1198,8 @@ const TYPE_META = {
 
 const CAT_LABELS = {
   isa: "ISA", pension: "Pensions", mortgage: "Mortgage",
-  debt: "Debt", savings: "Savings", retirement: "Retirement", general: "General",
+  debt: "Debt", savings: "Savings", retirement: "Retirement",
+  tax: "Tax", general: "General",
 };
 
 function AdvisorTab({ insights }) {
@@ -1232,6 +1275,161 @@ function AdvisorTab({ insights }) {
       ) : (
         filtered.map((ins, i) => <InsightCard key={i} insight={ins} />)
       )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CASHFLOW SANKEY — annual salary → tax/NI/pension → take-home → ISA/etc.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Themed node renderer — fills with our accent palette and shows a label
+const SankeyNode = ({ x, y, width, height, index, payload, containerWidth }) => {
+  const isOut = x + width + 6 > containerWidth;
+  const palette = [T.accent, T.purple, T.red, T.amber, T.blue, T.green, T.green, T.textMuted];
+  const colour = palette[index % palette.length];
+  return (
+    <Layer key={`SankeyNode-${index}`}>
+      <Rectangle x={x} y={y} width={width} height={height} fill={colour} fillOpacity={0.9} />
+      <text
+        textAnchor={isOut ? "end" : "start"}
+        x={isOut ? x - 6 : x + width + 6}
+        y={y + height / 2}
+        fontSize={11}
+        fill={T.text}
+        dy="0.355em"
+      >
+        {payload.name}
+      </text>
+      <text
+        textAnchor={isOut ? "end" : "start"}
+        x={isOut ? x - 6 : x + width + 6}
+        y={y + height / 2 + 12}
+        fontSize={10}
+        fill={T.textDim}
+        dy="0.355em"
+      >
+        {fmtFull(payload.value)}/yr
+      </text>
+    </Layer>
+  );
+};
+
+function CashflowSankey({ profile, accounts, settings }) {
+  const [taxData, setTaxData] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!profile.gross_salary || profile.gross_salary <= 0) return;
+    setError(false);
+    api.salarySacrifice({
+      gross_salary: profile.gross_salary,
+      current_contrib_pct: profile.pension_contrib_pct || 0,
+      proposed_contrib_pct: profile.pension_contrib_pct || 0, // same as current — we only need the figures
+      employer_contrib_pct: profile.employer_contrib_pct || 0,
+      tax_region: settings.tax_region || "scotland",
+    })
+      .then((r) => setTaxData(r.current))
+      .catch(() => setError(true));
+  }, [profile.gross_salary, profile.pension_contrib_pct, profile.employer_contrib_pct, settings.tax_region]);
+
+  if (!profile.gross_salary || profile.gross_salary <= 0) {
+    return (
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>Annual Cashflow</h3>
+        <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
+          Set your gross salary in <strong style={{ color: T.textMuted }}>Settings → Profile</strong> to see where it goes.
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>Annual Cashflow</h3>
+        <p style={{ fontSize: 12, color: T.red, margin: 0 }}>Couldn't compute tax figures.</p>
+      </div>
+    );
+  }
+
+  if (!taxData) {
+    return (
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>Annual Cashflow</h3>
+        <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>Loading...</p>
+      </div>
+    );
+  }
+
+  // Annual contributions out of take-home (post-tax/NI savings)
+  const annualISA = accounts.filter((a) => ISA_TYPES.has(a.type)).reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 12;
+  const annualSavings = accounts.filter((a) => a.type === "SAVINGS").reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 12;
+  // Debt repayments (excluding mortgage) — store contrib as negative on liabilities
+  const annualDebtPay = accounts.filter((a) => LIABILITY_TYPES.has(a.type) && a.type !== "MORTGAGE")
+    .reduce((s, a) => s + Math.abs(a.monthly_contrib || 0), 0) * 12;
+  // Mortgage shown separately so it doesn't lump into "Spending"
+  const annualMortgage = accounts.filter((a) => a.type === "MORTGAGE")
+    .reduce((s, a) => s + Math.abs(a.monthly_contrib || 0), 0) * 12;
+  // Whatever's left after savings/debt/mortgage = day-to-day spending
+  const spending = Math.max(0, taxData.take_home - annualISA - annualSavings - annualDebtPay - annualMortgage);
+
+  // Build node + link arrays. Node order is referenced by index in links.
+  const nodes = [{ name: "Salary" }];
+  const links = [];
+  const addNode = (name) => { nodes.push({ name }); return nodes.length - 1; };
+
+  // Salary → outflows
+  if (taxData.pension_contrib > 0) {
+    const i = addNode("Sacrifice");
+    links.push({ source: 0, target: i, value: taxData.pension_contrib });
+    const p = addNode("Pension Pot");
+    links.push({ source: i, target: p, value: taxData.pension_contrib });
+  }
+  if (taxData.income_tax > 0) {
+    links.push({ source: 0, target: addNode("Income Tax"), value: taxData.income_tax });
+  }
+  if (taxData.employee_ni > 0) {
+    links.push({ source: 0, target: addNode("Employee NI"), value: taxData.employee_ni });
+  }
+  const takeHomeIdx = addNode("Take-home");
+  links.push({ source: 0, target: takeHomeIdx, value: taxData.take_home });
+
+  // Take-home → savings/spending
+  if (annualISA > 0) links.push({ source: takeHomeIdx, target: addNode("ISA contributions"), value: annualISA });
+  if (annualSavings > 0) links.push({ source: takeHomeIdx, target: addNode("Savings"), value: annualSavings });
+  if (annualMortgage > 0) links.push({ source: takeHomeIdx, target: addNode("Mortgage"), value: annualMortgage });
+  if (annualDebtPay > 0) links.push({ source: takeHomeIdx, target: addNode("Debt repayment"), value: annualDebtPay });
+  if (spending > 0) links.push({ source: takeHomeIdx, target: addNode("Spending"), value: spending });
+
+  const data = { nodes, links };
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>Annual Cashflow</h3>
+          <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>
+            Where your {fmtFull(profile.gross_salary)} gross salary goes each year · {settings.tax_region === "scotland" ? "Scottish" : "rUK"} tax bands · Spending is residual (take-home minus savings & debt)
+          </p>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={320}>
+        <Sankey
+          data={data}
+          node={<SankeyNode />}
+          nodePadding={28}
+          margin={{ top: 10, right: 140, bottom: 10, left: 60 }}
+          link={{ stroke: T.accent, strokeOpacity: 0.18 }}
+        >
+          <Tooltip
+            contentStyle={ttStyle()}
+            itemStyle={ttItemStyle()}
+            labelStyle={ttLabelStyle()}
+            formatter={(v) => fmtFull(v)}
+          />
+        </Sankey>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -1501,6 +1699,8 @@ const GOAL_LINK_TYPES = [
   { value: "", label: "Manual (no auto-tracking)" },
   { value: "net_worth", label: "Overall Net Worth" },
   { value: "type:PENSION_DC", label: "DC Pensions total" },
+  { value: "type:GIA", label: "GIAs total" },
+  { value: "type:ISA_LISA", label: "Lifetime ISAs total" },
   { value: "type:SIPP", label: "SIPP total" },
   { value: "type:ISA_SS", label: "Stocks & Shares ISAs total" },
   { value: "type:ISA_CASH", label: "Cash ISAs total" },
