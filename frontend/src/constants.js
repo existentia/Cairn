@@ -31,6 +31,14 @@ export const NI_RATE_MAIN = 0.08;
 export const ISA_ANNUAL_ALLOWANCE = 20000;
 export const PENSION_ANNUAL_ALLOWANCE = 60000;
 
+// Pension Annual Allowance taper (2024/25 onwards)
+//   - Triggered when threshold income > £200k AND adjusted income > £260k
+//   - Allowance reduces by £1 for every £2 of adjusted income above £260k
+//   - Minimum tapered allowance: £10k
+export const AA_TAPER_THRESHOLD_INCOME = 200000;
+export const AA_TAPER_ADJUSTED_INCOME = 260000;
+export const AA_TAPER_MIN_ALLOWANCE = 10000;
+
 // Carry-forward pension AA history
 export const PENSION_AA_HISTORY = {
   "2014/15": 40000, "2015/16": 40000, "2016/17": 40000, "2017/18": 40000,

@@ -15,6 +15,7 @@ import {
   SCOTLAND_HIGHER_RATE_PCT, RUK_HIGHER_RATE_PCT,
   NI_RATE_MAIN,
   STATE_PENSION_AGE, PENSION_ACCESS_AGE, STATE_PENSION_ANNUAL_DEFAULT,
+  AA_TAPER_THRESHOLD_INCOME, AA_TAPER_ADJUSTED_INCOME, AA_TAPER_MIN_ALLOWANCE,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -142,6 +143,21 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
     });
   });
 
+  // ── Workplace pension match underused ────────────────────────────
+  // If the employer matches up to N% but the user contributes less, they're
+  // leaving free money on the table — the simplest pension win there is.
+  const matchMax = profile.employer_match_max_pct || 0;
+  if (matchMax > 0 && profile.pension_contrib_pct < matchMax && profile.gross_salary > 0) {
+    const gap = matchMax - profile.pension_contrib_pct;
+    const employerMissed = profile.gross_salary * (gap / 100);
+    const personalCost = employerMissed; // £1 you contribute = £1 they match
+    insights.push({
+      type: "warning", category: "pension", title: "Workplace Match Not Fully Used",
+      detail: `Employer matches up to ${matchMax}% but you're contributing ${profile.pension_contrib_pct}%. Raising your contribution by ${gap}% (${fmtFull(Math.round(personalCost))}/year, ~${fmtFull(Math.round(personalCost / 12))}/month gross) unlocks an extra ${fmtFull(Math.round(employerMissed))}/year of free employer money. Via salary sacrifice the personal cost is significantly less than the headline figure.`,
+      priority: 1,
+    });
+  }
+
   // ── Pension headroom ─────────────────────────────────────────────
   // Workplace contributions (sal-sac, gross) + per-account monthly contributions
   // to DC and SIPP pots. SIPP contributions are assumed RAS (net of 20% basic-rate
@@ -191,6 +207,35 @@ export function generateInsights({ profile, accounts, settings, snapshots }) {
       detail: `Gross salary of ${fmtFull(profile.gross_salary)} triggers the PA taper — you lose £1 of personal allowance for every £2 over £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()}, creating a ~60% effective marginal rate. You've lost ~${fmtFull(paLost)} of your PA. Salary sacrificing down to £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()} would fully restore it and could be worth ${fmtFull(Math.round(paLost * (SCOTLAND_HIGHER_RATE_PCT / 100)))} in additional tax relief.`,
       priority: 1,
     });
+  }
+
+  // ── Annual Allowance taper (high earners) ────────────────────────
+  // Approximation: use gross salary as a proxy for both threshold and adjusted
+  // income. Threshold income is taxable income minus member pension contribs;
+  // adjusted income adds back employer contribs. For a salaried user the
+  // approximation triggers correctly when gross_salary > £200k AND
+  // gross_salary + employer_contrib > £260k, which is the practically useful
+  // band where the user should investigate further.
+  if (profile.gross_salary > AA_TAPER_THRESHOLD_INCOME) {
+    const employerContrib = profile.gross_salary * ((profile.employer_contrib_pct || 0) / 100);
+    const adjustedIncomeProxy = profile.gross_salary + employerContrib;
+    if (adjustedIncomeProxy > AA_TAPER_ADJUSTED_INCOME) {
+      const excess = adjustedIncomeProxy - AA_TAPER_ADJUSTED_INCOME;
+      const reduction = Math.min(Math.floor(excess / 2), settings.pension_annual_allowance - AA_TAPER_MIN_ALLOWANCE);
+      const taperedAA = Math.max(AA_TAPER_MIN_ALLOWANCE, settings.pension_annual_allowance - reduction);
+      insights.push({
+        type: "warning", category: "pension", title: "Annual Allowance Taper",
+        detail: `Income above £${AA_TAPER_ADJUSTED_INCOME.toLocaleString()} triggers the Pension AA taper — your £${settings.pension_annual_allowance.toLocaleString()} allowance reduces by £1 for every £2 of adjusted income over the threshold, down to a £${AA_TAPER_MIN_ALLOWANCE.toLocaleString()} floor. Your estimated tapered allowance is ~${fmtFull(taperedAA)}. Over-contributing triggers an Annual Allowance charge at your marginal rate. The exact figure depends on your full adjusted/threshold income calculation — worth checking with an accountant.`,
+        priority: 1,
+      });
+    } else {
+      // Threshold income exceeded but adjusted income probably not — still flag as one to watch
+      insights.push({
+        type: "info", category: "pension", title: "Annual Allowance Taper Threshold",
+        detail: `Salary above £${AA_TAPER_THRESHOLD_INCOME.toLocaleString()} is the threshold for the Pension AA taper. The taper only bites once adjusted income (incl. employer pension contributions) exceeds £${AA_TAPER_ADJUSTED_INCOME.toLocaleString()}. Worth checking whether any bonus or RSU vest could push you over.`,
+        priority: 3,
+      });
+    }
   }
 
   // ── Pension access age approaching ───────────────────────────────

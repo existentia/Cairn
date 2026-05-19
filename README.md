@@ -18,6 +18,7 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Search, filter by type, and reorder accounts via drag-and-drop
 - Track `total_contributed` for investment accounts to calculate real returns
 - Portfolio Performance panel showing gain/loss and return % per account
+- **Bulk update screen** — edit every account balance in one place and save them all (plus a snapshot) in one click; the monthly logging workflow
 
 ### Retirement & Projections
 - Compound growth modelling with real returns (adjustable nominal growth rate and inflation)
@@ -31,9 +32,11 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Three scenarios: Lean FIRE (5% SWR, 70% expenses), Regular FIRE (4%), Fat FIRE (3.5%, 130% expenses)
 
 ### Financial Advisor
-Rule-based insights engine (14 rules) covering:
+Rule-based insights engine (16 rules) covering:
 - ISA allowance usage and days remaining in the tax year
 - Pension headroom vs annual allowance
+- **Workplace match underused** — flags when your contribution sits below the employer match threshold
+- **Annual Allowance taper** — alerts high earners (>£200k) when the pension AA taper may be in play
 - Salary sacrifice optimisation (with Scottish / rUK tax band awareness)
 - Debt prioritisation (high-interest first)
 - Emergency fund adequacy
@@ -125,10 +128,17 @@ cairn/
 │   └── requirements.txt    # Flask + Anthropic SDK + Werkzeug + gunicorn
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx         # Main dashboard UI
+│   │   ├── App.jsx         # Main dashboard UI + tab routing
 │   │   ├── api.js          # API client
-│   │   ├── advisor.js      # Financial insights engine
+│   │   ├── advisor.js      # Financial insights engine (16 rules)
 │   │   ├── constants.js    # UK tax constants mirror (frontend twin of uk_tax.py)
+│   │   ├── ui.jsx          # Shared design tokens (theme), formatters, primitives
+│   │   ├── tools/          # Self-contained calculator components
+│   │   │   ├── FIRECalculator.jsx
+│   │   │   ├── DrawdownSimulator.jsx
+│   │   │   ├── CarryForwardTool.jsx
+│   │   │   ├── SalarySacrificeTool.jsx
+│   │   │   └── DebtPayoffTool.jsx
 │   │   └── main.jsx
 │   ├── index.html
 │   ├── vite.config.js

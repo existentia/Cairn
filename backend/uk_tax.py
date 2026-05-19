@@ -59,6 +59,14 @@ NI_RATE_EMPLOYER = 0.15
 ISA_ANNUAL_ALLOWANCE = 20000
 PENSION_ANNUAL_ALLOWANCE = 60000
 
+# Pension Annual Allowance taper (2024/25 onwards)
+#   - Triggered when threshold income > £200k AND adjusted income > £260k
+#   - Allowance reduces by £1 for every £2 of adjusted income above £260k
+#   - Minimum tapered allowance: £10k
+AA_TAPER_THRESHOLD_INCOME = 200000
+AA_TAPER_ADJUSTED_INCOME = 260000
+AA_TAPER_MIN_ALLOWANCE = 10000
+
 # Carry-forward: prior-year pension annual allowances
 PENSION_AA_HISTORY = {
     "2014/15": 40000, "2015/16": 40000, "2016/17": 40000, "2017/18": 40000,

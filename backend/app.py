@@ -86,6 +86,7 @@ def init_db():
             employer_contrib_pct REAL NOT NULL DEFAULT 0,
             tax_code TEXT NOT NULL DEFAULT '1257L',
             state_pension_annual REAL NOT NULL DEFAULT 11500,
+            employer_match_max_pct REAL NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -290,7 +291,7 @@ def update_profile():
         UPDATE profile SET
             name = ?, dob = ?, retirement_age = ?, gross_salary = ?,
             pension_contrib_pct = ?, employer_contrib_pct = ?, tax_code = ?,
-            state_pension_annual = ?,
+            state_pension_annual = ?, employer_match_max_pct = ?,
             updated_at = datetime('now')
         WHERE id = 1
     """, (
@@ -299,6 +300,7 @@ def update_profile():
         data.get("pension_contrib_pct", 0), data.get("employer_contrib_pct", 0),
         data.get("tax_code", "1257L"),
         data.get("state_pension_annual", 11500),
+        data.get("employer_match_max_pct", 0),
     ))
     db.commit()
     return jsonify({"ok": True})
@@ -636,11 +638,13 @@ def import_data():
         db.execute("""
             UPDATE profile SET name=?, dob=?, retirement_age=?, gross_salary=?,
                 pension_contrib_pct=?, employer_contrib_pct=?, tax_code=?,
+                state_pension_annual=?, employer_match_max_pct=?,
                 updated_at=datetime('now')
             WHERE id = 1
         """, (p.get("name",""), p.get("dob","1980-01-01"), p.get("retirement_age",57),
               p.get("gross_salary",0), p.get("pension_contrib_pct",0),
-              p.get("employer_contrib_pct",0), p.get("tax_code","1257L")))
+              p.get("employer_contrib_pct",0), p.get("tax_code","1257L"),
+              p.get("state_pension_annual",11500), p.get("employer_match_max_pct",0)))
 
     if "accounts" in data:
         db.execute("DELETE FROM accounts")

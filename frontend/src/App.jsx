@@ -6,94 +6,21 @@ import {
 import { api } from "./api.js";
 import { generateInsights, fmtFull, ageFromDob } from "./advisor.js";
 import {
-  ASSET_TYPES, LIABILITY_TYPES, INVESTMENT_PENSION_TYPES, ISA_TYPES,
+  ASSET_TYPES, LIABILITY_TYPES, ISA_TYPES,
   PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
   ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
-  STATE_PENSION_ANNUAL_DEFAULT, PENSION_ACCESS_AGE,
-  getPriorTaxYears,
 } from "./constants.js";
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   DESIGN TOKENS
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-const DARK_THEME = {
-  bg: "#0b0e14",
-  surface: "#141821",
-  surfaceHover: "#1a1f2d",
-  border: "#222838",
-  borderLight: "#2c3344",
-  text: "#dfe2ea",
-  textMuted: "#7d839a",
-  textDim: "#4d5368",
-  accent: "#45c4b0",
-  accentHover: "#5ad6c2",
-  green: "#45c4b0",
-  red: "#e85d6f",
-  amber: "#e8b84d",
-  blue: "#5b8def",
-  purple: "#a477e8",
-  chartPalette: ["#45c4b0", "#5b8def", "#a477e8", "#e8b84d", "#e87d5d", "#6dc784"],
-  debtPalette: ["#e85d6f", "#e87d5d"],
-  radius: 8,
-  font: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif",
-  mono: "'IBM Plex Mono', 'SF Mono', monospace",
-};
-
-const LIGHT_THEME = {
-  bg: "#f0f2f7",
-  surface: "#ffffff",
-  surfaceHover: "#f5f7fc",
-  border: "#dce1ed",
-  borderLight: "#c8d0e0",
-  text: "#1c2035",
-  textMuted: "#5a6280",
-  textDim: "#9aa0b8",
-  accent: "#2ea898",
-  accentHover: "#34bfad",
-  green: "#2ea898",
-  red: "#d94f61",
-  amber: "#c8900a",
-  blue: "#3d6fcc",
-  purple: "#7c52cc",
-  chartPalette: ["#2ea898", "#3d6fcc", "#7c52cc", "#c8900a", "#d9714e", "#3aaa5c"],
-  debtPalette: ["#d94f61", "#d9714e"],
-  radius: 8,
-  font: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif",
-  mono: "'IBM Plex Mono', 'SF Mono', monospace",
-};
-
-const T = { ...DARK_THEME };
-
-const ACCOUNT_LABELS = {
-  PENSION_DC: "DC Pension", SIPP: "SIPP", PENSION_DB: "DB / Final Salary Pension",
-  ISA_SS: "Stocks & Shares ISA", ISA_CASH: "Cash ISA",
-  CURRENT: "Current Account", SAVINGS: "Savings Account", PROPERTY: "Property",
-  MORTGAGE: "Mortgage", CREDIT_CARD: "Credit Card", LOAN: "Loan",
-};
-
-const fmt = (v) => {
-  if (v == null) return "£0";
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1e6) return `${sign}£${(abs / 1e6).toFixed(1)}m`;
-  if (abs >= 1e3) return `${sign}£${(abs / 1e3).toFixed(1)}k`;
-  return `${sign}£${abs.toFixed(0)}`;
-};
-
-const makeGlobalStyles = () => `
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: ${T.bg}; color: ${T.text}; font-family: ${T.font}; -webkit-font-smoothing: antialiased; }
-  input, select, button { font-family: inherit; }
-  input[type=number] { -moz-appearance: textfield; }
-  input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; }
-  ::selection { background: ${T.accent}33; }
-  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: ${T.bg}; }
-  ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
-  @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-  @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
-`;
+import {
+  T, DARK_THEME, LIGHT_THEME, ACCOUNT_LABELS, fmt, makeGlobalStyles,
+  ttStyle, ttItemStyle, ttLabelStyle,
+  MetricCard, InsightCard, Tab, Field, Select, Btn,
+} from "./ui.jsx";
+import FIRECalculator from "./tools/FIRECalculator.jsx";
+import CarryForwardTool from "./tools/CarryForwardTool.jsx";
+import DrawdownSimulator from "./tools/DrawdownSimulator.jsx";
+import SalarySacrificeTool from "./tools/SalarySacrificeTool.jsx";
+import DebtPayoffTool from "./tools/DebtPayoffTool.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TOAST NOTIFICATION SYSTEM
@@ -138,99 +65,6 @@ function useToast() {
 
   return { addToast, ToastContainer };
 }
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   SHARED COMPONENTS
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function MetricCard({ label, value, sub, color }) {
-  return (
-    <div style={{
-      background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-      padding: "16px 18px", flex: "1 1 200px", minWidth: 170,
-    }}>
-      <div style={{ fontSize: 11, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6, fontWeight: 500 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: color || T.text, fontFamily: T.mono, letterSpacing: "-0.02em" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: T.textDim, marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
-
-function InsightCard({ insight }) {
-  const colours = { warning: T.red, opportunity: T.amber, good: T.green, info: T.blue };
-  const icons = { warning: "▲", opportunity: "▲", good: "●", info: "■" };
-  const c = colours[insight.type] || T.textMuted;
-  return (
-    <div style={{
-      background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${c}`,
-      borderRadius: T.radius, padding: "13px 16px", marginBottom: 8,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-        <span style={{ color: c, fontSize: 11, fontWeight: 700 }}>{icons[insight.type]}</span>
-        <span style={{ fontWeight: 600, color: c, fontSize: 13 }}>{insight.title}</span>
-      </div>
-      <div style={{ fontSize: 12.5, color: T.textMuted, lineHeight: 1.65 }}>{insight.detail}</div>
-    </div>
-  );
-}
-
-function Tab({ label, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      background: active ? T.surface : "transparent",
-      color: active ? T.accent : T.textMuted,
-      border: `1px solid ${active ? T.border : "transparent"}`,
-      borderRadius: 6, padding: "7px 15px", fontSize: 13,
-      fontWeight: active ? 600 : 400, cursor: "pointer", transition: "all 0.12s",
-    }}>{label}</button>
-  );
-}
-
-function Field({ label, value, onChange, type = "text", prefix, suffix, small, ...rest }) {
-  return (
-    <div style={{ flex: small ? "0 1 130px" : "1 1 200px" }}>
-      <label style={{ display: "block", fontSize: 10.5, color: T.textMuted, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{label}</label>
-      <div style={{ display: "flex", alignItems: "center", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, overflow: "hidden" }}>
-        {prefix && <span style={{ padding: "0 8px", color: T.textDim, fontSize: 12 }}>{prefix}</span>}
-        <input value={value} onChange={(e) => onChange(type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)} type={type}
-          style={{ flex: 1, background: "transparent", border: "none", color: T.text, padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: T.mono, width: "100%" }} {...rest} />
-        {suffix && <span style={{ padding: "0 8px", color: T.textDim, fontSize: 12 }}>{suffix}</span>}
-      </div>
-    </div>
-  );
-}
-
-function Select({ label, value, onChange, options }) {
-  return (
-    <div style={{ flex: "1 1 200px" }}>
-      <label style={{ display: "block", fontSize: 10.5, color: T.textMuted, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={{
-        width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6,
-        color: T.text, padding: "7px 10px", fontSize: 13, outline: "none",
-      }}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
-}
-
-function Btn({ children, onClick, variant = "primary", style: extraStyle }) {
-  const styles = {
-    primary: { background: T.accent, color: T.bg, border: "none", fontWeight: 600 },
-    secondary: { background: "transparent", color: T.textMuted, border: `1px solid ${T.border}` },
-    danger: { background: "transparent", color: T.red, border: `1px solid ${T.red}44` },
-  };
-  return (
-    <button onClick={onClick} style={{
-      ...styles[variant], borderRadius: 6, padding: "7px 16px", fontSize: 12.5,
-      cursor: "pointer", transition: "all 0.12s", ...extraStyle,
-    }}>{children}</button>
-  );
-}
-
-const ttStyle    = () => ({ backgroundColor: T.surface, border: `1px solid ${T.borderLight}`, borderRadius: T.radius, fontSize: 12, color: T.text, padding: "10px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.15)" });
-const ttItemStyle = () => ({ color: T.text, fontSize: 12, padding: "2px 0" });
-const ttLabelStyle = () => ({ color: T.textMuted, fontSize: 11, fontWeight: 600, marginBottom: 4 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LOGIN SCREEN
@@ -558,6 +392,26 @@ export default function App() {
     }
   };
 
+  const bulkUpdateBalances = async (changedAccounts) => {
+    if (changedAccounts.length === 0) return;
+    setSaving(true);
+    try {
+      // PUT each changed account in parallel — backend's update_account
+      // only writes the fields you pass, so balance-only updates are safe
+      await Promise.all(changedAccounts.map((a) =>
+        api.updateAccount(a.id, { balance: a.balance })
+      ));
+      // Take a fresh snapshot capturing the new state. INSERT OR REPLACE on
+      // date means re-running today is idempotent.
+      await api.takeSnapshot();
+      await loadData();
+      addToast(`Updated ${changedAccounts.length} account${changedAccounts.length !== 1 ? "s" : ""} and recorded snapshot`, "success");
+    } catch (e) {
+      addToast("Bulk update failed", "error");
+    }
+    setSaving(false);
+  };
+
   const updateSnapshot = async (id, updates) => {
     try {
       await api.updateSnapshot(id, updates);
@@ -709,7 +563,7 @@ export default function App() {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
-          {[["overview", "Overview"], ["accounts", "Accounts"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
+          {[["overview", "Overview"], ["accounts", "Accounts"], ["update", "Update Balances"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
             <Tab key={id} label={l} active={tab === id} onClick={() => setTab(id)} />
           ))}
         </div>
@@ -1028,6 +882,16 @@ export default function App() {
           );
         })()}
 
+        {/* ── UPDATE BALANCES (bulk) ───────────────────────────── */}
+        {tab === "update" && (
+          <BulkUpdateTab
+            accounts={accounts}
+            snapshots={snapshots}
+            saving={saving}
+            onSave={bulkUpdateBalances}
+          />
+        )}
+
         {/* ── GOALS ────────────────────────────────────────────── */}
         {tab === "goals" && (
           <GoalsTab
@@ -1102,6 +966,14 @@ function ProfileSettings({ profile, onSave, saving }) {
         <Field label="Your Pension %" type="number" value={form.pension_contrib_pct} onChange={(v) => upd("pension_contrib_pct", v)} suffix="%" small />
         <Field label="Employer %" type="number" value={form.employer_contrib_pct} onChange={(v) => upd("employer_contrib_pct", v)} suffix="%" small />
         <Field label="Tax Code" value={form.tax_code} onChange={(v) => upd("tax_code", v)} small />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="Employer Matches Up To" type="number" value={form.employer_match_max_pct ?? 0} onChange={(v) => upd("employer_match_max_pct", v)} suffix="%" small />
+        <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
+          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+            The maximum employee % your employer will match. Leave at 0 if you don't have a match scheme. Advisor will warn if you're contributing below this threshold.
+          </span>
+        </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? 11500} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
@@ -1272,268 +1144,6 @@ function TaxYearSummary({ profile, accounts, settings }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CARRY-FORWARD PENSION ALLOWANCE CALCULATOR
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function CarryForwardTool({ profile, settings }) {
-  const currentTaxYear = settings.tax_year || "2025/26";
-  const priorYears = useMemo(() => getPriorTaxYears(currentTaxYear, 3), [currentTaxYear]);
-  const currentAllowance = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
-  const currentContrib = Math.round(
-    profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100)
-  );
-
-  // Persist user-entered prior-year contributions per tax year so they survive
-  // navigation. Keyed by the current tax year so each year starts fresh.
-  const storageKey = `cairn_carry_forward_${currentTaxYear}`;
-  const [priorContribs, setPriorContribs] = useState(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return Object.fromEntries(priorYears.map((y) => [y.label, 0]));
-  });
-  useEffect(() => {
-    try { localStorage.setItem(storageKey, JSON.stringify(priorContribs)); } catch {}
-  }, [storageKey, priorContribs]);
-  // Re-seed when the set of prior years changes (e.g. tax year rollover)
-  useEffect(() => {
-    setPriorContribs((p) => {
-      const next = { ...p };
-      priorYears.forEach((y) => { if (!(y.label in next)) next[y.label] = 0; });
-      return next;
-    });
-  }, [priorYears]);
-
-  const upd = (yr, v) => setPriorContribs((p) => ({ ...p, [yr]: Math.max(0, Number(v)) }));
-
-  const rows = priorYears.map((y) => {
-    const contributed = priorContribs[y.label] || 0;
-    const unused = Math.max(0, y.allowance - contributed);
-    return { ...y, contributed, unused };
-  });
-
-  const totalCarryForward = rows.reduce((s, r) => s + r.unused, 0);
-  const totalAvailable = currentAllowance + totalCarryForward;
-  const capacityRemaining = Math.max(0, totalAvailable - currentContrib);
-  const currentUsedPct = Math.min(100, (currentContrib / totalAvailable) * 100);
-
-  // Months left in tax year (approx)
-  const now = new Date();
-  const taxYearEnd = new Date(
-    (now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6) ? now.getFullYear() + 1 : now.getFullYear()), 3, 5
-  );
-  const monthsLeft = Math.max(1, Math.round((taxYearEnd - now) / (1000 * 60 * 60 * 24 * 30.5)));
-  const monthlyNeeded = capacityRemaining > 0 ? Math.round(capacityRemaining / monthsLeft) : 0;
-
-  const Row = ({ label, allowance, contributed, unused, highlight }) => (
-    <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, alignItems: "center" }}>
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: highlight ? T.accent : T.text, fontWeight: highlight ? 600 : 400 }}>{label}</div>
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(allowance)}</div>
-      {highlight ? (
-        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
-      ) : (
-        <div>
-          <input type="number" value={contributed || ""} onChange={(e) => upd(label, e.target.value)}
-            placeholder="0"
-            style={{ width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text,
-              padding: "4px 8px", fontSize: 12, fontFamily: T.mono, outline: "none" }} />
-        </div>
-      )}
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: unused > 0 ? T.green : T.textDim, fontWeight: unused > 0 ? 600 : 400 }}>
-        {unused > 0 ? `+${fmtFull(unused)}` : "—"}
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Pension Carry-Forward Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px", lineHeight: 1.6 }}>
-          Unused pension annual allowance from the 3 prior tax years can be carried forward and added to this year's allowance.
-          You must exhaust the current year's allowance (£{currentAllowance.toLocaleString()}) first, and must have been a member of a registered pension scheme in each carry-forward year.
-        </p>
-
-        {/* Header */}
-        <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "6px 0", borderBottom: `1px solid ${T.border}`, marginBottom: 4 }}>
-          {["Tax Year", "Allowance", "Contributed", "Unused (CF)"].map((h) => (
-            <div key={h} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</div>
-          ))}
-        </div>
-
-        {rows.map((r) => <Row key={r.label} {...r} />)}
-        <Row label={currentTaxYear} allowance={currentAllowance} contributed={currentContrib} unused={Math.max(0, currentAllowance - currentContrib)} highlight />
-      </div>
-
-      {/* Results */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {[
-          { label: "Total carry-forward available", value: fmtFull(totalCarryForward), color: T.green, sub: "From 3 prior years" },
-          { label: "Total allowance this year", value: fmtFull(totalAvailable), color: T.accent, sub: `${fmtFull(currentAllowance)} + ${fmtFull(totalCarryForward)} CF` },
-          { label: "Remaining capacity", value: fmtFull(capacityRemaining), color: capacityRemaining > 0 ? T.blue : T.textDim, sub: "After estimated current contribs" },
-          { label: "Monthly sacrifice needed", value: capacityRemaining > 0 ? `${fmtFull(monthlyNeeded)}/mo` : "None needed", color: capacityRemaining > 0 ? T.amber : T.green, sub: `To use by 5 April (${monthsLeft} months left)` },
-        ].map((m, i) => (
-          <div key={i} style={{ flex: "1 1 160px", padding: "12px 14px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
-            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {capacityRemaining > 0 && (
-        <div style={{ background: T.surface, border: `1px solid ${T.amber}33`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12, color: T.textMuted, lineHeight: 1.7 }}>
-          <strong style={{ color: T.amber }}>Opportunity:</strong> You have {fmtFull(capacityRemaining)} of carry-forward capacity.
-          At your salary (£{profile.gross_salary.toLocaleString()}), a one-off or increased salary sacrifice contribution this tax year
-          could use this up — saving significant income tax on the way in. Use the <strong>Salary Sacrifice</strong> tool to model the exact take-home impact.
-          Carry-forward cannot be used once the tax year closes on 5 April.
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   DRAWDOWN SIMULATOR
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function DrawdownSimulator({ retirementPot, profile, settings, dbAnnualPension = 0 }) {
-  const spAnnual = (profile.state_pension_annual || 11500) + dbAnnualPension;
-  const realGrowth = Math.max(0, settings.growth_rate - settings.inflation_rate) / 100;
-  const defaultMonthly = retirementPot > 0 ? Math.max(500, Math.round(retirementPot * 0.04 / 12)) : 2500;
-  const [monthlySpend, setMonthlySpend] = useState(defaultMonthly);
-
-  const simulate = useCallback((monthly) => {
-    if (retirementPot <= 0) return [];
-    const pts = [];
-    let balance = retirementPot;
-    const annualSpend = monthly * 12;
-    for (let a = profile.retirement_age; a <= 100; a++) {
-      const sp = a >= 67 ? spAnnual : 0;
-      pts.push({ age: a, balance: Math.max(0, Math.round(balance)) });
-      if (balance <= 0) break;
-      balance = balance * (1 + realGrowth) - Math.max(0, annualSpend - sp);
-    }
-    return pts;
-  }, [retirementPot, profile.retirement_age, spAnnual, realGrowth]);
-
-  const mainData = useMemo(() => simulate(monthlySpend), [simulate, monthlySpend]);
-  const depletes = mainData.find((p) => p.balance === 0);
-  const depletionAge = depletes?.age;
-  const lastBalance = mainData[mainData.length - 1]?.balance || 0;
-
-  // Three spending scenarios for comparison table
-  const scenarios = useMemo(() => {
-    const levels = [
-      { label: "Lean", monthly: Math.round(monthlySpend * 0.75) },
-      { label: "Base", monthly: monthlySpend },
-      { label: "Comfortable", monthly: Math.round(monthlySpend * 1.25) },
-    ];
-    return levels.map(({ label, monthly }) => {
-      const data = simulate(monthly);
-      const dep = data.find((p) => p.balance === 0);
-      const pot100 = data[data.length - 1]?.balance || 0;
-      return { label, monthly, depletionAge: dep?.age, potAt100: pot100 };
-    });
-  }, [simulate, monthlySpend]);
-
-  const spStartsAt = profile.retirement_age < 67 ? 67 : null;
-
-  if (retirementPot <= 0) {
-    return (
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>Drawdown Simulator</h3>
-        <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>Add pension and ISA accounts to simulate the withdrawal phase.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-      <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Drawdown Simulator</h3>
-      <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 16px" }}>
-        Pot balance from retirement (age {profile.retirement_age}) · Today's money · {fmtFull(spAnnual)}/yr guaranteed income at 67 reduces pot withdrawals{dbAnnualPension > 0 ? ` (SP + DB pension)` : ""}
-      </p>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
-        <Field label="Monthly Spending in Retirement" type="number" value={monthlySpend}
-          onChange={(v) => setMonthlySpend(Math.max(0, v))} prefix="£" />
-        <div style={{ flex: "1 1 200px", paddingBottom: 2 }}>
-          <div style={{ fontSize: 11, color: T.textDim }}>
-            = {fmtFull(monthlySpend * 12)}/year · {fmtFull(Math.max(0, monthlySpend * 12 - spAnnual))}/year from pot after State Pension
-          </div>
-        </div>
-      </div>
-
-      {/* Pot balance chart */}
-      <ResponsiveContainer width="100%" height={280}>
-        <AreaChart data={mainData}>
-          <defs>
-            <linearGradient id="ddG" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={T.purple} stopOpacity={0.3} />
-              <stop offset="100%" stopColor={T.purple} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-          <XAxis dataKey="age" tick={{ fontSize: 10, fill: T.textDim }} label={{ value: "Age", position: "insideBottomRight", offset: -4, fill: T.textDim, fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
-          <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()}
-            formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Age ${v}`} />
-          <Area type="monotone" dataKey="balance" name="Pot Balance" stroke={T.purple} fill="url(#ddG)" strokeWidth={2} dot={false} />
-          {spStartsAt && (
-            <ReferenceLine x={spStartsAt} stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5}
-              label={{ value: `SP age ${spStartsAt}`, fill: T.amber, fontSize: 10, position: "insideTopRight" }} />
-          )}
-          {depletionAge && (
-            <ReferenceLine x={depletionAge} stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5}
-              label={{ value: `Depletes ${depletionAge}`, fill: T.red, fontSize: 10, position: "insideTopLeft" }} />
-          )}
-        </AreaChart>
-      </ResponsiveContainer>
-
-      {/* Key metrics */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "16px 0" }}>
-        {[
-          depletionAge
-            ? { label: "Pot depletes at age", value: depletionAge, color: T.red, sub: `${depletionAge - profile.retirement_age} years of drawdown` }
-            : { label: "Pot at age 100", value: fmtFull(lastBalance), color: T.green, sub: "Survives full retirement" },
-          { label: "Self-funded years (pre-SP)", value: spStartsAt ? `${67 - profile.retirement_age}y` : "N/A", color: T.amber, sub: `Ages ${profile.retirement_age}–67` },
-          { label: "Annual spend from pot (post-SP)", value: fmtFull(Math.max(0, monthlySpend * 12 - spAnnual)), color: T.blue, sub: `After ${fmtFull(spAnnual)}/yr State Pension` },
-          { label: "Total monthly income at 67+", value: fmtFull(monthlySpend), color: T.accent, sub: `Pot + SP combined` },
-        ].map((m, i) => (
-          <div key={i} style={{ flex: "1 1 160px", padding: "10px 12px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 3, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
-            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Spending scenarios comparison */}
-      <div>
-        <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Spending scenarios</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {scenarios.map((s) => (
-            <div key={s.label} style={{
-              flex: "1 1 140px", padding: "10px 12px", background: T.bg, borderRadius: T.radius,
-              border: `1px solid ${s.depletionAge ? T.red + "44" : T.green + "44"}`,
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
-              <div style={{ fontSize: 13, fontFamily: T.mono, fontWeight: 600 }}>{fmtFull(s.monthly)}/mo</div>
-              <div style={{ fontSize: 11, color: s.depletionAge ? T.red : T.green, marginTop: 4 }}>
-                {s.depletionAge ? `Depletes age ${s.depletionAge}` : `Pot survives to 100+`}
-              </div>
-              {!s.depletionAge && <div style={{ fontSize: 10.5, color: T.textDim }}>Remaining: {fmtFull(s.potAt100)}</div>}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
    ADVISOR TAB — filterable insights
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -1627,6 +1237,172 @@ function AdvisorTab({ insights }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   BULK BALANCE UPDATE — the monthly "log everything at once" screen
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
+  // Initialise from current balances; reset whenever the underlying account
+  // list changes (e.g. after a successful save reloads data).
+  const initial = useMemo(
+    () => Object.fromEntries(accounts.map((a) => [a.id, a.balance])),
+    [accounts]
+  );
+  const [balances, setBalances] = useState(initial);
+  useEffect(() => { setBalances(initial); }, [initial]);
+
+  // Drafts: only count edits where the new value differs from the original
+  const changedIds = accounts.filter((a) => balances[a.id] !== a.balance).map((a) => a.id);
+  const changedCount = changedIds.length;
+
+  const assets = accounts.filter((a) => ASSET_TYPES.has(a.type));
+  const liabilities = accounts.filter((a) => LIABILITY_TYPES.has(a.type));
+
+  const sumByType = (list, useDraft) => list.reduce((s, a) => {
+    const v = useDraft ? (balances[a.id] ?? a.balance) : a.balance;
+    return s + (LIABILITY_TYPES.has(a.type) ? Math.abs(v) : v);
+  }, 0);
+
+  const currentNetWorth = sumByType(assets, false) - sumByType(liabilities, false);
+  const newNetWorth = sumByType(assets, true) - sumByType(liabilities, true);
+  const delta = newNetWorth - currentNetWorth;
+
+  const lastSnapshot = snapshots.length > 0
+    ? [...snapshots].sort((a, b) => b.date.localeCompare(a.date))[0]
+    : null;
+  const daysSinceLast = lastSnapshot
+    ? Math.floor((Date.now() - new Date(lastSnapshot.date).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  const handleSave = () => {
+    const changed = accounts
+      .filter((a) => balances[a.id] !== a.balance)
+      .map((a) => ({ id: a.id, balance: balances[a.id] }));
+    onSave(changed);
+  };
+
+  const reset = () => setBalances(initial);
+
+  const Row = ({ a }) => {
+    const cur = balances[a.id] ?? a.balance;
+    const changed = cur !== a.balance;
+    const rowDelta = cur - a.balance;
+    return (
+      <div style={{
+        display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1.2fr 0.8fr", gap: 10,
+        padding: "8px 4px", borderBottom: `1px solid ${T.border}`, alignItems: "center",
+        background: changed ? T.accent + "10" : "transparent", borderRadius: changed ? 4 : 0,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{a.name}</div>
+        <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[a.type] || a.type}</div>
+        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(a.balance)}</div>
+        <input
+          type="number"
+          value={cur === 0 && !changed ? "" : cur}
+          placeholder="0"
+          onChange={(e) => setBalances((p) => ({ ...p, [a.id]: parseFloat(e.target.value) || 0 }))}
+          style={{
+            background: T.bg, border: `1px solid ${changed ? T.accent : T.border}`, borderRadius: 6,
+            color: changed ? T.accent : T.text, padding: "6px 10px", fontSize: 13,
+            fontFamily: T.mono, outline: "none", fontWeight: changed ? 600 : 400,
+          }}
+        />
+        <div style={{ fontSize: 11.5, fontFamily: T.mono, textAlign: "right",
+          color: !changed ? T.textDim : rowDelta > 0 ? T.green : T.red }}>
+          {changed ? `${rowDelta >= 0 ? "+" : ""}${fmtFull(rowDelta)}` : "—"}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionHeader = ({ title }) => (
+    <div style={{
+      display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1.2fr 0.8fr", gap: 10,
+      padding: "0 4px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 4,
+    }}>
+      {[title, "Type", "Current", "New balance", "Δ"].map((h, i) => (
+        <div key={i} style={{
+          fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase",
+          letterSpacing: "0.04em", textAlign: i === 4 ? "right" : "left",
+        }}>{h}</div>
+      ))}
+    </div>
+  );
+
+  if (accounts.length === 0) {
+    return (
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 24, textAlign: "center", color: T.textDim, fontSize: 13 }}>
+        No accounts yet. Add a few in the Accounts tab to enable bulk updates.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Intro */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Update All Balances</h3>
+        <p style={{ fontSize: 11.5, color: T.textDim, margin: 0, lineHeight: 1.6 }}>
+          Edit every account in one go. When you save, changed balances are written and a snapshot is recorded for today.
+          {lastSnapshot && (
+            <> Last snapshot was <strong style={{ color: T.textMuted }}>{lastSnapshot.date}</strong>{daysSinceLast != null && ` — ${daysSinceLast} day${daysSinceLast !== 1 ? "s" : ""} ago`}.</>
+          )}
+        </p>
+      </div>
+
+      {/* Live summary */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <MetricCard label="Current Net Worth" value={fmtFull(currentNetWorth)} sub="Before changes" />
+        <MetricCard label="After Update" value={fmtFull(newNetWorth)} color={delta >= 0 ? T.green : T.red} sub={changedCount > 0 ? `Preview with ${changedCount} edit${changedCount !== 1 ? "s" : ""}` : "No edits yet"} />
+        <MetricCard
+          label="Net Change"
+          value={`${delta >= 0 ? "+" : ""}${fmtFull(delta)}`}
+          color={delta === 0 ? T.textMuted : delta > 0 ? T.green : T.red}
+          sub={changedCount > 0 ? `Across ${changedCount} account${changedCount !== 1 ? "s" : ""}` : "—"}
+        />
+      </div>
+
+      {/* Assets */}
+      {assets.length > 0 && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <SectionHeader title="Asset" />
+          {assets.map((a) => <Row key={a.id} a={a} />)}
+        </div>
+      )}
+
+      {/* Liabilities */}
+      {liabilities.length > 0 && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+          <SectionHeader title="Liability" />
+          {liabilities.map((a) => <Row key={a.id} a={a} />)}
+        </div>
+      )}
+
+      {/* Sticky action bar */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
+        padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center",
+        flexWrap: "wrap", gap: 10, position: "sticky", bottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+      }}>
+        <div style={{ fontSize: 12.5, color: T.textMuted }}>
+          {changedCount === 0
+            ? "No changes yet. Edit any balance to enable saving."
+            : <>
+                <strong style={{ color: T.text }}>{changedCount}</strong> edit{changedCount !== 1 ? "s" : ""} ready
+                · Net change: <strong style={{ color: delta >= 0 ? T.green : T.red }}>{delta >= 0 ? "+" : ""}{fmtFull(delta)}</strong>
+              </>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="secondary" onClick={reset}>Reset</Btn>
+          <Btn onClick={handleSave} style={{ opacity: changedCount === 0 || saving ? 0.5 : 1, pointerEvents: changedCount === 0 || saving ? "none" : "auto" }}>
+            {saving ? "Saving..." : "Save & Snapshot"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    SNAPSHOT HISTORY MANAGER
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -1713,161 +1489,6 @@ function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
           </div>
         )
       )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   FIRE CALCULATOR
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function FIRECalculator({ profile, accounts, settings, netWorth }) {
-  const defaultExpenses = Math.round(Math.max(1500, (profile.gross_salary * 0.55) / 12));
-  const [annualExpenses, setAnnualExpenses] = useState(defaultExpenses * 12);
-  const [swr, setSwr] = useState(4);
-
-  const realGrowthRate = Math.max(0, (settings.growth_rate - settings.inflation_rate)) / 100;
-  const monthlyRealGrowth = realGrowthRate / 12;
-
-  const monthlySavings = accounts
-    .filter((a) => ASSET_TYPES.has(a.type))
-    .reduce((s, a) => s + (a.monthly_contrib || 0), 0)
-    + (profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100)) / 12;
-
-  const fireNumber = swr > 0 ? Math.round(annualExpenses / (swr / 100)) : 0;
-  const progress = fireNumber > 0 ? Math.min(100, (netWorth / fireNumber) * 100) : 0;
-
-  // Years to FIRE (iterative: monthly compound)
-  const yearsToFIRE = useMemo(() => {
-    if (netWorth >= fireNumber) return 0;
-    if (monthlySavings <= 0 && netWorth <= 0) return null;
-    let pot = netWorth;
-    for (let m = 0; m <= 12 * 60; m++) {
-      if (pot >= fireNumber) return m / 12;
-      pot = pot * (1 + monthlyRealGrowth) + monthlySavings;
-    }
-    return null; // > 60 years
-  }, [netWorth, fireNumber, monthlySavings, monthlyRealGrowth]);
-
-  const fireDate = yearsToFIRE != null
-    ? new Date(Date.now() + yearsToFIRE * 365.25 * 24 * 3600 * 1000).getFullYear()
-    : null;
-
-  // Coast FIRE: pot needed now to grow to fireNumber by retirement_age without contributions
-  const age = ageFromDob(profile.dob);
-  const yearsToRetirement = Math.max(0, profile.retirement_age - age);
-  const coastFIRE = yearsToRetirement > 0 && fireNumber > 0
-    ? Math.round(fireNumber / Math.pow(1 + realGrowthRate, yearsToRetirement))
-    : fireNumber;
-  const hasCoasted = netWorth >= coastFIRE;
-
-  // Spending scenarios
-  const scenarios = [
-    { label: "Lean FIRE", swr: 5, factor: 0.7 },
-    { label: "Regular FIRE", swr: 4, factor: 1.0 },
-    { label: "Fat FIRE", swr: 3.5, factor: 1.3 },
-  ].map(({ label, swr: s, factor }) => {
-    const target = Math.round((annualExpenses * factor) / (s / 100));
-    const prog = Math.min(100, (netWorth / target) * 100);
-    return { label, swr: s, annualSpend: Math.round(annualExpenses * factor), target, progress: prog };
-  });
-
-  const ProgressBar = ({ value, color = T.accent }) => (
-    <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", marginTop: 6 }}>
-      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, value))}%`, background: color, borderRadius: 3, transition: "width 0.4s ease" }} />
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {/* Inputs */}
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>FIRE Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
-          Financial Independence, Retire Early — find the portfolio size that funds your retirement indefinitely.
-          Based on the safe withdrawal rate (SWR) concept: FIRE number = annual expenses ÷ SWR.
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Field label="Annual Expenses in Retirement" type="number" value={annualExpenses} onChange={setAnnualExpenses} prefix="£" />
-          <Field label="Safe Withdrawal Rate" type="number" value={swr} onChange={setSwr} suffix="%" small />
-          <div style={{ flex: "1 1 180px", display: "flex", alignItems: "flex-end", paddingBottom: 2 }}>
-            <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
-              4% is the classic Trinity Study rate. 3.5% is more conservative; 5% works for shorter retirements.
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Key metrics */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {[
-          { label: "FIRE Number", value: fmtFull(fireNumber), color: T.accent, sub: `${swr}% SWR on ${fmtFull(annualExpenses)}/yr` },
-          { label: "Current Progress", value: `${progress.toFixed(1)}%`, color: progress >= 100 ? T.green : T.blue, sub: `${fmtFull(netWorth)} of ${fmtFull(fireNumber)}` },
-          yearsToFIRE === 0
-            ? { label: "Status", value: "FIRE! 🔥", color: T.green, sub: "Net worth exceeds FIRE number" }
-            : yearsToFIRE != null
-              ? { label: "Years to FIRE", value: `${yearsToFIRE.toFixed(1)}y`, color: T.amber, sub: fireDate ? `Estimated ${fireDate}` : "" }
-              : { label: "Years to FIRE", value: ">60y", color: T.red, sub: "Increase savings or reduce target" },
-          { label: "Coast FIRE", value: fmtFull(coastFIRE), color: hasCoasted ? T.green : T.purple,
-            sub: hasCoasted ? "Already coasted — growth alone will do it" : `${yearsToRetirement}y of growth needed` },
-        ].map((m, i) => (
-          <div key={i} style={{ flex: "1 1 160px", padding: "12px 14px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
-            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Progress bar */}
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-          <span style={{ fontSize: 12, color: T.textMuted }}>Progress to FIRE</span>
-          <span style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: T.accent }}>{progress.toFixed(1)}%</span>
-        </div>
-        <ProgressBar value={progress} color={progress >= 100 ? T.green : T.accent} />
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-          <span style={{ fontSize: 10.5, color: T.textDim }}>{fmtFull(netWorth)} today</span>
-          <span style={{ fontSize: 10.5, color: T.textDim }}>{fmtFull(fireNumber)} target</span>
-        </div>
-
-        {/* Coast FIRE marker */}
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-            <span style={{ fontSize: 12, color: T.textMuted }}>Coast FIRE progress</span>
-            <span style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: hasCoasted ? T.green : T.purple }}>
-              {Math.min(100, (netWorth / coastFIRE) * 100).toFixed(1)}%
-            </span>
-          </div>
-          <ProgressBar value={(netWorth / coastFIRE) * 100} color={hasCoasted ? T.green : T.purple} />
-          <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>
-            Coast FIRE means your pot (at {fmtFull(coastFIRE)}) would grow to your FIRE number by retirement age {profile.retirement_age} with no further pension/ISA contributions — assuming you still cover day-to-day living costs from earnings until then.
-          </div>
-        </div>
-      </div>
-
-      {/* Scenarios comparison */}
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h4 style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 14px" }}>Spending Scenarios</h4>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {scenarios.map((s) => (
-            <div key={s.label} style={{
-              flex: "1 1 180px", padding: "14px 16px", background: T.bg, borderRadius: T.radius,
-              border: `1px solid ${s.label === "Regular FIRE" ? T.accent + "44" : T.border}`,
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
-              <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>{s.swr}% SWR · {fmtFull(s.annualSpend)}/yr</div>
-              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{fmtFull(s.target)}</div>
-              <ProgressBar value={s.progress} color={s.progress >= 100 ? T.green : T.accent} />
-              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>{s.progress.toFixed(1)}% there</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ marginTop: 12, fontSize: 11, color: T.textDim, lineHeight: 1.6 }}>
-          Monthly savings used in projection: <strong style={{ color: T.textMuted }}>{fmtFull(Math.round(monthlySavings))}/month</strong> ·
-          Real growth rate: <strong style={{ color: T.textMuted }}>{(realGrowthRate * 100).toFixed(1)}%</strong> (after {settings.inflation_rate}% inflation)
-        </div>
-      </div>
     </div>
   );
 }
@@ -2083,219 +1704,6 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
       {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
-    </div>
-  );
-}
-
-function SalarySacrificeTool({ profile, settings }) {
-  const [currentPct, setCurrentPct] = useState(profile.pension_contrib_pct || 5);
-  const [proposedPct, setProposedPct] = useState(Math.min((profile.pension_contrib_pct || 5) + 5, 40));
-  const [employerPct, setEmployerPct] = useState(profile.employer_contrib_pct || 3);
-  const [gross, setGross] = useState(profile.gross_salary || 50000);
-  const [taxRegion, setTaxRegion] = useState(settings?.tax_region || "scotland");
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const calculate = async () => {
-    setLoading(true);
-    try {
-      const res = await api.salarySacrifice({
-        gross_salary: gross,
-        current_contrib_pct: currentPct,
-        proposed_contrib_pct: proposedPct,
-        employer_contrib_pct: employerPct,
-        tax_region: taxRegion,
-      });
-      setResult(res);
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => { calculate(); }, []);
-
-  const regionLabel = taxRegion === "scotland" ? "Scotland (2025/26)" : "England / Wales / NI (2025/26)";
-
-  const StatRow = ({ label, current, proposed, highlight }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>
-      <span style={{ color: T.textMuted, flex: 1 }}>{label}</span>
-      <span style={{ fontFamily: T.mono, width: 100, textAlign: "right" }}>{current}</span>
-      <span style={{ fontFamily: T.mono, width: 100, textAlign: "right", color: highlight ? T.accent : T.text }}>{proposed}</span>
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Salary Sacrifice Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px" }}>
-          Uses {regionLabel} income tax bands. Shows the true cost of increasing pension contributions via salary sacrifice.
-        </p>
-        <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-          {[["scotland", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland"], ["ruk", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Eng / Wales / NI"]].map(([val, lbl]) => (
-            <button key={val} onClick={() => setTaxRegion(val)} style={{
-              background: taxRegion === val ? T.accent + "22" : "transparent",
-              color: taxRegion === val ? T.accent : T.textMuted,
-              border: `1px solid ${taxRegion === val ? T.accent + "66" : T.border}`,
-              borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: taxRegion === val ? 600 : 400,
-            }}>{lbl}</button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-          <Field label="Gross Salary" type="number" value={gross} onChange={setGross} prefix="£" />
-          <Field label="Current Contrib %" type="number" value={currentPct} onChange={setCurrentPct} suffix="%" small />
-          <Field label="Proposed Contrib %" type="number" value={proposedPct} onChange={setProposedPct} suffix="%" small />
-          <Field label="Employer %" type="number" value={employerPct} onChange={setEmployerPct} suffix="%" small />
-        </div>
-        <Btn onClick={calculate}>{loading ? "Calculating..." : "Calculate"}</Btn>
-      </div>
-
-      {result && (
-        <>
-          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "0 0 8px", marginBottom: 8, borderBottom: `2px solid ${T.border}` }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: T.textMuted }}>Annual Breakdown</span>
-              <div style={{ display: "flex" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, width: 100, textAlign: "right" }}>CURRENT</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.accent, width: 100, textAlign: "right" }}>PROPOSED</span>
-              </div>
-            </div>
-            <StatRow label="Gross Salary" current={fmtFull(gross)} proposed={fmtFull(gross)} />
-            <StatRow label="Salary Sacrifice" current={fmtFull(result.current.pension_contrib)} proposed={fmtFull(result.proposed.pension_contrib)} highlight />
-            <StatRow label="Taxable Income" current={fmtFull(result.current.taxable_income)} proposed={fmtFull(result.proposed.taxable_income)} />
-            <StatRow label="Income Tax" current={fmtFull(result.current.income_tax)} proposed={fmtFull(result.proposed.income_tax)} />
-            <StatRow label="Employee NI" current={fmtFull(result.current.employee_ni)} proposed={fmtFull(result.proposed.employee_ni)} />
-            <StatRow label="Take-Home Pay" current={fmtFull(result.current.take_home)} proposed={fmtFull(result.proposed.take_home)} highlight />
-            <StatRow label="Your Pension Contrib" current={fmtFull(result.current.pension_contrib)} proposed={fmtFull(result.proposed.pension_contrib)} highlight />
-            <StatRow label="Employer Contrib" current={fmtFull(result.current.employer_contrib)} proposed={fmtFull(result.proposed.employer_contrib)} />
-            <StatRow label="Total to Pension" current={fmtFull(result.current.total_pension)} proposed={fmtFull(result.proposed.total_pension)} highlight />
-          </div>
-
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {[
-              { label: "Take-home reduction", value: `${fmtFull(result.comparison.take_home_reduction_monthly)}/mo`, sub: `${fmtFull(result.comparison.take_home_reduction_annual)}/year`, color: T.red },
-              { label: "Pension increase", value: `${fmtFull(result.comparison.pension_increase_monthly)}/mo`, sub: `${fmtFull(result.comparison.pension_increase_annual)}/year`, color: T.green },
-              { label: "Tax & NI saved", value: fmtFull(result.comparison.tax_ni_saved), sub: "Annual saving", color: T.accent },
-              { label: "Effective cost", value: `${result.comparison.effective_cost_ratio}%`, sub: "Pence per £1 to pension", color: T.blue },
-            ].map((m, i) => (
-              <div key={i} style={{ flex: "1 1 140px", padding: "12px 14px", background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
-                <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 4, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: m.color, fontFamily: T.mono }}>{m.value}</div>
-                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{m.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {result.comparison.employer_ni_saving > 0 && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
-              <strong style={{ color: T.amber }}>Employer NI saving:</strong> Your employer saves {fmtFull(result.comparison.employer_ni_saving)}/year in Employer NI. Ask if they'll share this — some employers pass part or all of it into your pension as an additional contribution.
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function DebtPayoffTool({ accounts: allAccounts }) {
-  const debtAccounts = allAccounts.filter(a => LIABILITY_TYPES.has(a.type) && a.type !== "MORTGAGE" && Math.abs(a.balance) > 0);
-  const [extraMonthly, setExtraMonthly] = useState(200);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [debts, setDebts] = useState(
-    debtAccounts.map(a => ({
-      name: a.name,
-      balance: Math.abs(a.balance),
-      rate: a.interest_rate || 0,
-      min_payment: Math.abs(a.monthly_contrib || 50),
-    }))
-  );
-
-  const calculate = async () => {
-    if (debts.length === 0) return;
-    setLoading(true);
-    try {
-      const res = await api.debtPayoff({ debts, extra_monthly: extraMonthly });
-      setResult(res);
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => { if (debts.length > 0) calculate(); }, []);
-
-  const updDebt = (idx, field, val) => {
-    setDebts(prev => prev.map((d, i) => i === idx ? { ...d, [field]: val } : d));
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Debt Payoff Planner</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
-          Compare avalanche (highest rate first) vs snowball (smallest balance first) strategies. Excludes mortgage.
-        </p>
-
-        {debts.length === 0 ? (
-          <div style={{ padding: 20, textAlign: "center", color: T.textDim, fontSize: 13 }}>
-            No non-mortgage debts found. Add credit card or loan accounts to use this tool.
-          </div>
-        ) : (
-          <>
-            {debts.map((d, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8, padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
-                <Field label="Debt" value={d.name} onChange={(v) => updDebt(i, "name", v)} />
-                <Field label="Balance" type="number" value={d.balance} onChange={(v) => updDebt(i, "balance", v)} prefix="£" small />
-                <Field label="APR" type="number" value={d.rate} onChange={(v) => updDebt(i, "rate", v)} suffix="%" small />
-                <Field label="Min Payment" type="number" value={d.min_payment} onChange={(v) => updDebt(i, "min_payment", v)} prefix="£" small />
-              </div>
-            ))}
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
-              <Field label="Extra Monthly Payment" type="number" value={extraMonthly} onChange={setExtraMonthly} prefix="£" small />
-              <Btn onClick={calculate} style={{ marginBottom: 1 }}>{loading ? "Calculating..." : "Calculate"}</Btn>
-            </div>
-          </>
-        )}
-      </div>
-
-      {result && (
-        <>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {[
-              { label: "Avalanche", sub: "Highest rate first", months: result.avalanche.months, interest: result.avalanche.total_interest, color: T.green, best: result.avalanche.total_interest <= result.snowball.total_interest },
-              { label: "Snowball", sub: "Smallest balance first", months: result.snowball.months, interest: result.snowball.total_interest, color: T.blue, best: result.snowball.total_interest < result.avalanche.total_interest },
-              { label: "Minimums Only", sub: "No extra payments", months: result.minimum_only.months, interest: result.minimum_only.total_interest, color: T.red, best: false },
-            ].map((s, i) => (
-              <div key={i} style={{
-                flex: "1 1 200px", padding: "14px 16px", background: T.surface, borderRadius: T.radius,
-                border: `1px solid ${s.best ? s.color + "66" : T.border}`,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>{s.label}</div>
-                    <div style={{ fontSize: 10.5, color: T.textDim }}>{s.sub}</div>
-                  </div>
-                  {s.best && <span style={{ fontSize: 10, background: s.color + "22", color: s.color, padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>BEST</span>}
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color: s.color }}>
-                  {Math.floor(s.months / 12)}y {s.months % 12}m
-                </div>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
-                  Total interest: {fmtFull(s.interest)}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {result.savings_vs_minimum.interest_saved > 0 && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.green}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
-              Paying an extra {fmtFull(extraMonthly)}/month saves you <strong style={{ color: T.green }}>{fmtFull(result.savings_vs_minimum.interest_saved)}</strong> in interest and clears your debt <strong style={{ color: T.green }}>{result.savings_vs_minimum.months_saved} months</strong> sooner compared to minimum payments only.
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }
