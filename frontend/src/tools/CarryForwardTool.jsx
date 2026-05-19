@@ -61,7 +61,15 @@ export default function CarryForwardTool({ profile, settings }) {
         <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
       ) : (
         <div>
-          <input type="number" value={contributed || ""} onChange={(e) => upd(label, e.target.value)}
+          <input
+            type="text"
+            inputMode="decimal"
+            value={contributed || ""}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+              upd(label, raw);
+            }}
             placeholder="0"
             style={{ width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text,
               padding: "4px 8px", fontSize: 12, fontFamily: T.mono, outline: "none" }} />

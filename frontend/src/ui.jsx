@@ -10,6 +10,8 @@
  * at call time so they read the current theme.
  */
 
+import { useState, useEffect, useRef } from "react";
+
 /* ═══════════════════════════════════════════════════════════════════════════
    DESIGN TOKENS
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -148,14 +150,67 @@ export function Tab({ label, active, onClick }) {
   );
 }
 
+// Convert a numeric value to the string we want to display in the input.
+// `0` and null show as empty (with placeholder), so users can type immediately
+// without first clearing the field — the controlled-value-snap-back problem.
+function numToDraft(v) {
+  if (v == null || v === 0) return "";
+  return String(v);
+}
+
 export function Field({ label, value, onChange, type = "text", prefix, suffix, small, ...rest }) {
+  const isNumeric = type === "number";
+  // Keep an internal draft string for numeric inputs so transient/empty states
+  // (mid-typing, sole minus sign, decimal point) don't get fought by React's
+  // controlled-value rendering. We push the parsed value to the parent on each
+  // keystroke, but the draft remains as the user typed it.
+  const [draft, setDraft] = useState(() => (isNumeric ? numToDraft(value) : ""));
+  // Track the last value we pushed so we only reseed the draft when the parent
+  // value changes from something *other* than our own push (e.g. external
+  // form reset, reseed-from-account-data).
+  const lastPushed = useRef(value);
+
+  useEffect(() => {
+    if (!isNumeric) return;
+    if (value !== lastPushed.current) {
+      setDraft(numToDraft(value));
+      lastPushed.current = value;
+    }
+  }, [value, isNumeric]);
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    if (!isNumeric) {
+      onChange(raw);
+      return;
+    }
+    // Allow only digits, single decimal, optional leading minus, or empty.
+    // Reject anything else (stray letters, scientific notation, multiple dots).
+    if (raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
+    setDraft(raw);
+    const parsed = parseFloat(raw);
+    const next = Number.isNaN(parsed) ? 0 : parsed;
+    lastPushed.current = next;
+    onChange(next);
+  };
+
   return (
     <div style={{ flex: small ? "0 1 130px" : "1 1 200px" }}>
       <label style={{ display: "block", fontSize: 10.5, color: T.textMuted, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{label}</label>
       <div style={{ display: "flex", alignItems: "center", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, overflow: "hidden" }}>
         {prefix && <span style={{ padding: "0 8px", color: T.textDim, fontSize: 12 }}>{prefix}</span>}
-        <input value={value} onChange={(e) => onChange(type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)} type={type}
-          style={{ flex: 1, background: "transparent", border: "none", color: T.text, padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: T.mono, width: "100%" }} {...rest} />
+        <input
+          value={isNumeric ? draft : value}
+          onChange={handleChange}
+          // Render numerics as text+inputMode to avoid Safari's controlled
+          // type=number quirks (notably "0 you can't delete") while still
+          // surfacing the decimal keypad on iOS.
+          type={isNumeric ? "text" : type}
+          inputMode={isNumeric ? "decimal" : undefined}
+          placeholder={isNumeric ? "0" : undefined}
+          style={{ flex: 1, background: "transparent", border: "none", color: T.text, padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: T.mono, width: "100%" }}
+          {...rest}
+        />
         {suffix && <span style={{ padding: "0 8px", color: T.textDim, fontSize: 12 }}>{suffix}</span>}
       </div>
     </div>

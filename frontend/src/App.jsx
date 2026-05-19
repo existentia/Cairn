@@ -1537,10 +1537,16 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
         <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[a.type] || a.type}</div>
         <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(a.balance)}</div>
         <input
-          type="number"
-          value={cur === 0 && !changed ? "" : cur}
+          type="text"
+          inputMode="decimal"
+          value={cur === 0 ? "" : cur}
           placeholder="0"
-          onChange={(e) => setBalances((p) => ({ ...p, [a.id]: parseFloat(e.target.value) || 0 }))}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
+            const parsed = parseFloat(raw);
+            setBalances((p) => ({ ...p, [a.id]: Number.isNaN(parsed) ? 0 : parsed }));
+          }}
           style={{
             background: T.bg, border: `1px solid ${changed ? T.accent : T.border}`, borderRadius: 6,
             color: changed ? T.accent : T.text, padding: "6px 10px", fontSize: 13,
