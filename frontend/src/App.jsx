@@ -16,7 +16,7 @@ import {
 import {
   T, DARK_THEME, LIGHT_THEME, ACCOUNT_LABELS, fmt, makeGlobalStyles,
   ttStyle, ttItemStyle, ttLabelStyle,
-  MetricCard, InsightCard, Tab, Field, Select, Btn,
+  MetricCard, InsightCard, Tab, Field, NumberInput, Select, Btn,
 } from "./ui.jsx";
 import FIRECalculator from "./tools/FIRECalculator.jsx";
 import CarryForwardTool from "./tools/CarryForwardTool.jsx";
@@ -1507,6 +1507,57 @@ function CashflowSankey({ profile, accounts, settings }) {
    BULK BALANCE UPDATE — the monthly "log everything at once" screen
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// Top-level so React keeps the row component identity stable across parent
+// re-renders. Defining the row inside BulkUpdateTab caused each keystroke to
+// re-create the function, which React saw as a different component type and
+// remounted the <input> — losing focus and reverting the cursor every time.
+const BULK_GRID = "1.6fr 1fr 1fr 1.2fr 0.8fr";
+
+function BulkUpdateSectionHeader({ title }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: BULK_GRID, gap: 10,
+      padding: "0 4px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 4,
+    }}>
+      {[title, "Type", "Current", "New balance", "Δ"].map((h, i) => (
+        <div key={i} style={{
+          fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase",
+          letterSpacing: "0.04em", textAlign: i === 4 ? "right" : "left",
+        }}>{h}</div>
+      ))}
+    </div>
+  );
+}
+
+function BulkUpdateRow({ account, currentBalance, onChange }) {
+  const changed = currentBalance !== account.balance;
+  const rowDelta = currentBalance - account.balance;
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: BULK_GRID, gap: 10,
+      padding: "8px 4px", borderBottom: `1px solid ${T.border}`, alignItems: "center",
+      background: changed ? T.accent + "10" : "transparent", borderRadius: changed ? 4 : 0,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{account.name}</div>
+      <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[account.type] || account.type}</div>
+      <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(account.balance)}</div>
+      <NumberInput
+        value={currentBalance}
+        onChange={onChange}
+        style={{
+          background: T.bg, border: `1px solid ${changed ? T.accent : T.border}`, borderRadius: 6,
+          color: changed ? T.accent : T.text, padding: "6px 10px", fontSize: 13,
+          fontFamily: T.mono, outline: "none", fontWeight: changed ? 600 : 400,
+        }}
+      />
+      <div style={{ fontSize: 11.5, fontFamily: T.mono, textAlign: "right",
+        color: !changed ? T.textDim : rowDelta > 0 ? T.green : T.red }}>
+        {changed ? `${rowDelta >= 0 ? "+" : ""}${fmtFull(rowDelta)}` : "—"}
+      </div>
+    </div>
+  );
+}
+
 function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
   // Initialise from current balances; reset whenever the underlying account
   // list changes (e.g. after a successful save reloads data).
@@ -1549,57 +1600,7 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
 
   const reset = () => setBalances(initial);
 
-  const Row = ({ a }) => {
-    const cur = balances[a.id] ?? a.balance;
-    const changed = cur !== a.balance;
-    const rowDelta = cur - a.balance;
-    return (
-      <div style={{
-        display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1.2fr 0.8fr", gap: 10,
-        padding: "8px 4px", borderBottom: `1px solid ${T.border}`, alignItems: "center",
-        background: changed ? T.accent + "10" : "transparent", borderRadius: changed ? 4 : 0,
-      }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{a.name}</div>
-        <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[a.type] || a.type}</div>
-        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(a.balance)}</div>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={cur === 0 ? "" : cur}
-          placeholder="0"
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
-            const parsed = parseFloat(raw);
-            setBalances((p) => ({ ...p, [a.id]: Number.isNaN(parsed) ? 0 : parsed }));
-          }}
-          style={{
-            background: T.bg, border: `1px solid ${changed ? T.accent : T.border}`, borderRadius: 6,
-            color: changed ? T.accent : T.text, padding: "6px 10px", fontSize: 13,
-            fontFamily: T.mono, outline: "none", fontWeight: changed ? 600 : 400,
-          }}
-        />
-        <div style={{ fontSize: 11.5, fontFamily: T.mono, textAlign: "right",
-          color: !changed ? T.textDim : rowDelta > 0 ? T.green : T.red }}>
-          {changed ? `${rowDelta >= 0 ? "+" : ""}${fmtFull(rowDelta)}` : "—"}
-        </div>
-      </div>
-    );
-  };
-
-  const SectionHeader = ({ title }) => (
-    <div style={{
-      display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1.2fr 0.8fr", gap: 10,
-      padding: "0 4px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 4,
-    }}>
-      {[title, "Type", "Current", "New balance", "Δ"].map((h, i) => (
-        <div key={i} style={{
-          fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase",
-          letterSpacing: "0.04em", textAlign: i === 4 ? "right" : "left",
-        }}>{h}</div>
-      ))}
-    </div>
-  );
+  const setBalance = (id, v) => setBalances((p) => ({ ...p, [id]: v }));
 
   if (accounts.length === 0) {
     return (
@@ -1637,16 +1638,30 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
       {/* Assets */}
       {assets.length > 0 && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-          <SectionHeader title="Asset" />
-          {assets.map((a) => <Row key={a.id} a={a} />)}
+          <BulkUpdateSectionHeader title="Asset" />
+          {assets.map((a) => (
+            <BulkUpdateRow
+              key={a.id}
+              account={a}
+              currentBalance={balances[a.id] ?? a.balance}
+              onChange={(v) => setBalance(a.id, v)}
+            />
+          ))}
         </div>
       )}
 
       {/* Liabilities */}
       {liabilities.length > 0 && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-          <SectionHeader title="Liability" />
-          {liabilities.map((a) => <Row key={a.id} a={a} />)}
+          <BulkUpdateSectionHeader title="Liability" />
+          {liabilities.map((a) => (
+            <BulkUpdateRow
+              key={a.id}
+              account={a}
+              currentBalance={balances[a.id] ?? a.balance}
+              onChange={(v) => setBalance(a.id, v)}
+            />
+          ))}
         </div>
       )}
 

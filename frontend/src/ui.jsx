@@ -217,6 +217,46 @@ export function Field({ label, value, onChange, type = "text", prefix, suffix, s
   );
 }
 
+/**
+ * Bare numeric input — same draft-state pattern as Field, but without the
+ * label/wrapper. For places that need a number input inside their own layout
+ * (e.g. table rows). Keeps the displayed string in sync with the user's typing
+ * so transient states like "5." or "" don't get reverted to the parsed value.
+ */
+export function NumberInput({ value, onChange, placeholder = "0", style, ...rest }) {
+  const [draft, setDraft] = useState(() => numToDraft(value));
+  const lastPushed = useRef(value);
+
+  useEffect(() => {
+    if (value !== lastPushed.current) {
+      setDraft(numToDraft(value));
+      lastPushed.current = value;
+    }
+  }, [value]);
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    if (raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
+    setDraft(raw);
+    const parsed = parseFloat(raw);
+    const next = Number.isNaN(parsed) ? 0 : parsed;
+    lastPushed.current = next;
+    onChange(next);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onChange={handleChange}
+      placeholder={placeholder}
+      style={style}
+      {...rest}
+    />
+  );
+}
+
 export function Select({ label, value, onChange, options }) {
   return (
     <div style={{ flex: "1 1 200px" }}>

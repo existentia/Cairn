@@ -1,7 +1,33 @@
 import { useState, useEffect, useMemo } from "react";
-import { T } from "../ui.jsx";
+import { T, NumberInput } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { getPriorTaxYears, PENSION_ANNUAL_ALLOWANCE } from "../constants.js";
+
+// Top-level so React keeps its identity stable across parent re-renders —
+// otherwise the input remounts on every keystroke and loses focus.
+function CFRow({ label, allowance, contributed, unused, highlight, currentContrib, onChange }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, alignItems: "center" }}>
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: highlight ? T.accent : T.text, fontWeight: highlight ? 600 : 400 }}>{label}</div>
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(allowance)}</div>
+      {highlight ? (
+        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
+      ) : (
+        <div>
+          <NumberInput
+            value={contributed}
+            onChange={onChange}
+            placeholder="0"
+            style={{ width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text,
+              padding: "4px 8px", fontSize: 12, fontFamily: T.mono, outline: "none" }} />
+        </div>
+      )}
+      <div style={{ fontSize: 12, fontFamily: T.mono, color: unused > 0 ? T.green : T.textDim, fontWeight: unused > 0 ? 600 : 400 }}>
+        {unused > 0 ? `+${fmtFull(unused)}` : "—"}
+      </div>
+    </div>
+  );
+}
 
 export default function CarryForwardTool({ profile, settings }) {
   const currentTaxYear = settings.tax_year || "2025/26";
@@ -33,7 +59,7 @@ export default function CarryForwardTool({ profile, settings }) {
     });
   }, [priorYears]);
 
-  const upd = (yr, v) => setPriorContribs((p) => ({ ...p, [yr]: Math.max(0, Number(v)) }));
+  const upd = (yr, v) => setPriorContribs((p) => ({ ...p, [yr]: Math.max(0, Number(v) || 0) }));
 
   const rows = priorYears.map((y) => {
     const contributed = priorContribs[y.label] || 0;
@@ -53,34 +79,6 @@ export default function CarryForwardTool({ profile, settings }) {
   const monthsLeft = Math.max(1, Math.round((taxYearEnd - now) / (1000 * 60 * 60 * 24 * 30.5)));
   const monthlyNeeded = capacityRemaining > 0 ? Math.round(capacityRemaining / monthsLeft) : 0;
 
-  const Row = ({ label, allowance, contributed, unused, highlight }) => (
-    <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, alignItems: "center" }}>
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: highlight ? T.accent : T.text, fontWeight: highlight ? 600 : 400 }}>{label}</div>
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(allowance)}</div>
-      {highlight ? (
-        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
-      ) : (
-        <div>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={contributed || ""}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
-              upd(label, raw);
-            }}
-            placeholder="0"
-            style={{ width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text,
-              padding: "4px 8px", fontSize: 12, fontFamily: T.mono, outline: "none" }} />
-        </div>
-      )}
-      <div style={{ fontSize: 12, fontFamily: T.mono, color: unused > 0 ? T.green : T.textDim, fontWeight: unused > 0 ? 600 : 400 }}>
-        {unused > 0 ? `+${fmtFull(unused)}` : "—"}
-      </div>
-    </div>
-  );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
@@ -97,8 +95,24 @@ export default function CarryForwardTool({ profile, settings }) {
           ))}
         </div>
 
-        {rows.map((r) => <Row key={r.label} {...r} />)}
-        <Row label={currentTaxYear} allowance={currentAllowance} contributed={currentContrib} unused={Math.max(0, currentAllowance - currentContrib)} highlight />
+        {rows.map((r) => (
+          <CFRow
+            key={r.label}
+            label={r.label}
+            allowance={r.allowance}
+            contributed={r.contributed}
+            unused={r.unused}
+            onChange={(v) => upd(r.label, v)}
+          />
+        ))}
+        <CFRow
+          label={currentTaxYear}
+          allowance={currentAllowance}
+          contributed={currentContrib}
+          currentContrib={currentContrib}
+          unused={Math.max(0, currentAllowance - currentContrib)}
+          highlight
+        />
       </div>
 
       {/* Results */}
