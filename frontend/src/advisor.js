@@ -24,6 +24,7 @@ import {
   MARRIAGE_ALLOWANCE_TRANSFER, MARRIAGE_ALLOWANCE_SAVING,
   MARRIAGE_ALLOWANCE_SPOUSE_MAX,
   PERSONAL_ALLOWANCE,
+  daysUntilTaxYearEnd,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -38,13 +39,6 @@ const ageFromDob = (dob) => {
   if (now.getMonth() < d.getMonth() || (now.getMonth() === d.getMonth() && now.getDate() < d.getDate())) age--;
   return age;
 };
-
-function daysUntilTaxYearEnd() {
-  const now = new Date();
-  let taxYearEnd = new Date(now.getFullYear(), 3, 5);
-  if (now > taxYearEnd) taxYearEnd = new Date(now.getFullYear() + 1, 3, 5);
-  return Math.ceil((taxYearEnd - now) / (1000 * 60 * 60 * 24));
-}
 
 export function generateInsights({ profile, accounts, settings, snapshots, boe_rate }) {
   const insights = [];

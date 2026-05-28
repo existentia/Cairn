@@ -123,3 +123,11 @@ export function getPriorTaxYears(currentLabel, count = 3) {
   }
   return out;
 }
+
+// UK tax year ends on 5 April. Returns whole days until the next 5 April
+// (today returns 0; tomorrow 1; 5 April itself 0; 6 April returns ~365).
+export function daysUntilTaxYearEnd(now = new Date()) {
+  let end = new Date(now.getFullYear(), 3, 5);
+  if (now > end) end = new Date(now.getFullYear() + 1, 3, 5);
+  return Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+}

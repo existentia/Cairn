@@ -25,6 +25,7 @@ import SalarySacrificeTool from "./tools/SalarySacrificeTool.jsx";
 import BonusOptimiser from "./tools/BonusOptimiser.jsx";
 import IhtEstimator from "./tools/IhtEstimator.jsx";
 import DebtPayoffTool from "./tools/DebtPayoffTool.jsx";
+import TaxYearDashboard from "./tools/TaxYearDashboard.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TOAST NOTIFICATION SYSTEM
@@ -2068,11 +2069,12 @@ function GoalsTab({ goals, accounts, netWorth, onAdd, onSave, onDelete }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function ToolsTab({ profile, accounts, settings, netWorth }) {
-  const [activeTool, setActiveTool] = useState("fire");
+  const [activeTool, setActiveTool] = useState("tax-year");
 
   return (
     <div>
       <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
+        <Tab label="Tax Year" active={activeTool === "tax-year"} onClick={() => setActiveTool("tax-year")} />
         <Tab label="FIRE Calculator" active={activeTool === "fire"} onClick={() => setActiveTool("fire")} />
         <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
@@ -2080,6 +2082,7 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
         <Tab label="IHT Estimator" active={activeTool === "iht"} onClick={() => setActiveTool("iht")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
+      {activeTool === "tax-year" && <TaxYearDashboard profile={profile} accounts={accounts} settings={settings} onNavigate={setActiveTool} />}
       {activeTool === "fire" && <FIRECalculator profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />}
       {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
