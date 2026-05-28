@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   PieChart, Pie, Cell, AreaChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
-  Sankey, Layer, Rectangle,
+  Sankey, Layer, Rectangle, BarChart, Bar,
 } from "recharts";
 import { api } from "./api.js";
 import { generateInsights, fmtFull, ageFromDob } from "./advisor.js";
@@ -715,6 +715,102 @@ export default function App() {
                           stroke={color} fill={`url(#sg-${key})`} strokeWidth={1.5} dot={false} />
                       ))}
                     </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              );
+            })()}
+
+            {/* Net Worth Attribution — break each period's NW delta into
+                contributions, market movement, cash flow, property, and debt
+                paydown. Sums to the actual delta; "Other" picks up anything
+                uncategorised (notably GIA, which isn't in snapshot_categories). */}
+            {(() => {
+              const catSnaps = snapshots.filter((s) => s.categories && Object.keys(s.categories).length > 0);
+              if (catSnaps.length < 2) return null;
+
+              const INVEST_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "ISA_LISA"]);
+              const monthlyInvestContrib = accounts
+                .filter((a) => INVEST_TYPES.has(a.type))
+                .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+
+              const ATTRIB_CONFIG = [
+                { key: "contrib",  label: "Contributions",   color: T.accent },
+                { key: "market",   label: "Market movement", color: T.blue },
+                { key: "cash",     label: "Cash flow",       color: T.purple },
+                { key: "property", label: "Property reval.", color: T.amber },
+                { key: "debt",     label: "Debt paydown",    color: "#6dc784" },
+                { key: "other",    label: "Other",           color: T.textMuted },
+              ];
+
+              const data = [];
+              for (let i = 1; i < catSnaps.length; i++) {
+                const prev = catSnaps[i - 1];
+                const curr = catSnaps[i];
+                const months = Math.max(0.01, (new Date(curr.date) - new Date(prev.date)) / (1000 * 60 * 60 * 24 * 30.44));
+                const nwDelta = (curr.net_worth || 0) - (prev.net_worth || 0);
+                const pensionsDelta = (curr.categories.pensions || 0) - (prev.categories.pensions || 0);
+                const isasDelta = (curr.categories.isas || 0) - (prev.categories.isas || 0);
+                const cashDelta = (curr.categories.cash || 0) - (prev.categories.cash || 0);
+                const propertyDelta = (curr.categories.property || 0) - (prev.categories.property || 0);
+                // debts category is stored as a negative sum, so a paydown (debt
+                // balance shrinking) shows as a positive delta — exactly the
+                // sign we want for the attribution stack.
+                const debtsDelta = (curr.categories.debts || 0) - (prev.categories.debts || 0);
+
+                const contrib = Math.round(monthlyInvestContrib * months);
+                const market = Math.round(pensionsDelta + isasDelta - contrib);
+                const cash = Math.round(cashDelta);
+                const property = Math.round(propertyDelta);
+                const debt = Math.round(debtsDelta);
+                const other = Math.round(nwDelta - contrib - market - cash - property - debt);
+
+                data.push({ date: curr.date, contrib, market, cash, property, debt, other });
+              }
+
+              // Hide the Other stack when it's consistently tiny — declutters
+              // the legend for users without GIA holdings (the usual source).
+              const showOther = data.some((d) => Math.abs(d.other) > 100);
+              const activeConfig = showOther
+                ? ATTRIB_CONFIG
+                : ATTRIB_CONFIG.filter((c) => c.key !== "other");
+
+              const AttribTooltip = ({ active, payload, label }) => {
+                if (!active || !payload || !payload.length) return null;
+                const total = payload.reduce((s, p) => s + (Number(p.value) || 0), 0);
+                return (
+                  <div style={ttStyle()}>
+                    <div style={ttLabelStyle()}>{label}</div>
+                    {payload.map((p, i) => (
+                      <div key={i} style={{ ...ttItemStyle(), color: p.color }}>
+                        {p.name}: {fmtFull(p.value)}
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${T.border}`, fontSize: 12, fontWeight: 600, color: total >= 0 ? T.green : T.red }}>
+                      Total Δ: {fmtFull(total)}
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Net Worth Attribution</h3>
+                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px", lineHeight: 1.5 }}>
+                    Each bar splits the period's net-worth change into contributions, market movement on pensions/ISAs, cash-flow shift, property revaluation, and debt paydown.
+                    Contributions assume your current monthly rates held historically; cash flow reflects current/savings balance shifts and will be noisy month-to-month.
+                  </p>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                      <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                      <Tooltip content={<AttribTooltip />} cursor={{ fill: T.borderLight, opacity: 0.2 }} />
+                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      <ReferenceLine y={0} stroke={T.border} />
+                      {activeConfig.map(({ key, label, color }) => (
+                        <Bar key={key} dataKey={key} name={label} stackId="atb" fill={color} />
+                      ))}
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               );
