@@ -29,6 +29,23 @@ export const RUK_HIGHER_RATE_PCT = 40;
 export const NI_PRIMARY_THRESHOLD = 12570;
 export const NI_UPPER_EARNINGS_LIMIT = 50270;
 export const NI_RATE_MAIN = 0.08;
+export const NI_RATE_UEL_PLUS = 0.02;
+
+// Income tax bands as [upper_bound, rate] — upper bounds are absolute gross
+// income assuming the full personal allowance (mirror of uk_tax.py).
+export const SCOTLAND_BANDS = [
+  [14876, 0.19],     // Starter
+  [26561, 0.20],     // Basic
+  [43662, 0.21],     // Intermediate
+  [75000, 0.42],     // Higher
+  [125140, 0.45],    // Advanced
+  [Infinity, 0.48],  // Top
+];
+export const RUK_BANDS = [
+  [50270, 0.20],     // Basic
+  [125140, 0.40],    // Higher
+  [Infinity, 0.45],  // Additional
+];
 
 // Allowances
 export const ISA_ANNUAL_ALLOWANCE = 20000;

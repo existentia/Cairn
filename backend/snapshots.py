@@ -11,9 +11,10 @@ from datetime import date
 from uk_tax import ASSET_TYPES, LIABILITY_TYPES, ISA_TYPES
 
 # Categories shown on the Asset Mix stacked chart.
-_CATEGORY_KEYS = ("pensions", "isas", "property", "cash", "debts")
+_CATEGORY_KEYS = ("pensions", "isas", "investments", "property", "cash", "debts")
 _PENSION_TYPES = {"PENSION_DC", "SIPP", "PENSION_DB"}
 _CASH_TYPES = {"CURRENT", "SAVINGS"}
+_INVESTMENT_TYPES = {"GIA"}  # taxable wrappers — not ISAs, not pensions
 
 
 def _categorise(accounts):
@@ -26,6 +27,8 @@ def _categorise(accounts):
             cats["pensions"] += bal
         elif t in ISA_TYPES:
             cats["isas"] += bal
+        elif t in _INVESTMENT_TYPES:
+            cats["investments"] += bal
         elif t == "PROPERTY":
             cats["property"] += bal
         elif t in _CASH_TYPES:

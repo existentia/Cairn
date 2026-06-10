@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   PieChart, Pie, Cell, AreaChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
@@ -24,6 +24,7 @@ import DrawdownSimulator from "./tools/DrawdownSimulator.jsx";
 import SalarySacrificeTool from "./tools/SalarySacrificeTool.jsx";
 import BonusOptimiser from "./tools/BonusOptimiser.jsx";
 import IhtEstimator from "./tools/IhtEstimator.jsx";
+import MarginalRateCurve from "./tools/MarginalRateCurve.jsx";
 import DebtPayoffTool from "./tools/DebtPayoffTool.jsx";
 import TaxYearDashboard from "./tools/TaxYearDashboard.jsx";
 
@@ -272,6 +273,40 @@ export default function App() {
   const [accountTypeFilter, setAccountTypeFilter] = useState("all");
   const { addToast, ToastContainer } = useToast();
   const [isDark, setIsDark] = useState(() => localStorage.getItem("cairn_theme") !== "light");
+  const [realTerms, setRealTerms] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [snapBannerDismissed, setSnapBannerDismissed] = useState(
+    () => sessionStorage.getItem("cairn_snap_banner_dismissed") === "1"
+  );
+
+  // Keyboard shortcuts. The handler is registered once and reads the latest
+  // actions through a ref, so it never closes over stale state. `g` opens a
+  // 1.5s window for the second key (vim-style); `?` toggles the cheatsheet.
+  const shortcutActions = useRef({});
+  useEffect(() => {
+    let gPressedAt = 0;
+    const handler = (e) => {
+      const el = e.target;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const a = shortcutActions.current;
+
+      if (e.key === "?") { a.toggleShortcuts?.(); return; }
+      if (e.key === "Escape") { a.closeShortcuts?.(); return; }
+
+      if (gPressedAt && Date.now() - gPressedAt < 1500) {
+        gPressedAt = 0;
+        const tabMap = { o: "overview", u: "update", a: "advisor", t: "tools", p: "projections", l: "goals", c: "accounts" };
+        if (e.key === "s") { a.takeSnapshot?.(); return; }
+        if (tabMap[e.key]) { a.setTab?.(tabMap[e.key]); return; }
+        return;
+      }
+      if (e.key === "g") gPressedAt = Date.now();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Sync mutable T to current theme on every render
   Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
@@ -413,6 +448,14 @@ export default function App() {
     }
   };
 
+  // Keep the shortcut handler pointed at the latest closures (no stale state)
+  shortcutActions.current = {
+    takeSnapshot,
+    setTab,
+    toggleShortcuts: () => setShowShortcuts((s) => !s),
+    closeShortcuts: () => setShowShortcuts(false),
+  };
+
   const bulkUpdateBalances = async (changedAccounts) => {
     if (changedAccounts.length === 0) return;
     setSaving(true);
@@ -527,9 +570,23 @@ export default function App() {
   const projData = (() => {
     const pts = [];
     const totalPensions = accounts.filter((a) => a.type === "PENSION_DC" || a.type === "SIPP").reduce((s, a) => s + a.balance, 0);
-    const totalISAs = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH").reduce((s, a) => s + a.balance, 0);
-    const mpc = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100) / 12;
-    const mic = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+    // "ISAs" series also carries LISA and GIA — everything investable outside pensions
+    const totalISAs = accounts
+      .filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH" || a.type === "ISA_LISA" || a.type === "GIA")
+      .reduce((s, a) => s + a.balance, 0);
+    // Pension contributions: workplace sal-sac (gross) + per-account DC contribs
+    // + SIPP contribs grossed up for RAS basic-rate relief — same convention
+    // as advisor.js's pensionAnnual.
+    const workplaceMonthly = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100) / 12;
+    const dcMonthly = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+    const sippMonthlyGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
+    const mpc = workplaceMonthly + dcMonthly + sippMonthlyGross;
+    // ISA-side contributions: plain ISAs + LISA grossed up 25% for the
+    // government bonus + GIA contribs.
+    const plainIsaMonthly = accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+    const lisaMonthlyWithBonus = accounts.filter((a) => a.type === "ISA_LISA").reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 1.25;
+    const giaMonthly = accounts.filter((a) => a.type === "GIA").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
+    const mic = plainIsaMonthly + lisaMonthlyWithBonus + giaMonthly;
     const rg = (settings.growth_rate - settings.inflation_rate) / 100 / 12;
     let p = totalPensions, i = totalISAs;
     for (let y = 0; y <= Math.min(ytr + 5, 35); y++) {
@@ -557,10 +614,59 @@ export default function App() {
   const retirementPotLow = retirementPotData?.lower || 0;
   const retirementPotHigh = retirementPotData?.upper || 0;
 
+  // Snapshot staleness — drives the Overview reminder banner
+  const lastSnapshotDate = snapshots.length > 0
+    ? [...snapshots].map((s) => s.date).sort().pop()
+    : null;
+  const daysSinceSnapshot = lastSnapshotDate
+    ? Math.floor((Date.now() - new Date(lastSnapshotDate).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  const showSnapBanner = !snapBannerDismissed && (daysSinceSnapshot == null || daysSinceSnapshot > 35);
+  const dismissSnapBanner = () => {
+    setSnapBannerDismissed(true);
+    try { sessionStorage.setItem("cairn_snap_banner_dismissed", "1"); } catch {}
+  };
+
   return (
     <>
       <style>{makeGlobalStyles()}</style>
       <ToastContainer />
+
+      {/* Keyboard shortcuts cheatsheet (toggle with ?) */}
+      {showShortcuts && (
+        <div onClick={() => setShowShortcuts(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9998,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: T.surface, border: `1px solid ${T.borderLight}`, borderRadius: 12,
+            padding: 24, width: "100%", maxWidth: 380, boxShadow: "0 12px 48px rgba(0,0,0,0.4)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Keyboard Shortcuts</h3>
+              <button onClick={() => setShowShortcuts(false)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 16 }}>✕</button>
+            </div>
+            {[
+              ["g  s", "Take snapshot"],
+              ["g  o", "Overview"],
+              ["g  u", "Update Balances"],
+              ["g  c", "Accounts"],
+              ["g  l", "Goals"],
+              ["g  p", "Projections"],
+              ["g  a", "Advisor"],
+              ["g  t", "Tools"],
+              ["?", "Toggle this cheatsheet"],
+            ].map(([keys, desc]) => (
+              <div key={keys} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12.5 }}>
+                <span style={{ color: T.textMuted }}>{desc}</span>
+                <kbd style={{ fontFamily: T.mono, fontSize: 11.5, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 8px", color: T.accent, letterSpacing: "0.1em" }}>{keys}</kbd>
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 10 }}>Shortcuts are inactive while typing in a field.</div>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>
 
         {/* Header */}
@@ -613,6 +719,27 @@ export default function App() {
         {/* ── OVERVIEW ─────────────────────────────────────────── */}
         {tab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {/* Snapshot staleness reminder */}
+            {showSnapBanner && (
+              <div style={{
+                background: T.surface, border: `1px solid ${T.amber}44`, borderLeft: `3px solid ${T.amber}`,
+                borderRadius: T.radius, padding: "12px 16px",
+                display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10,
+              }}>
+                <div style={{ fontSize: 12.5, color: T.textMuted }}>
+                  {daysSinceSnapshot == null
+                    ? <>No snapshots recorded yet — log your first to start the net worth chart.</>
+                    : <>Last snapshot was <strong style={{ color: T.amber }}>{daysSinceSnapshot} days ago</strong> ({lastSnapshotDate}) — log this month?</>}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Btn onClick={takeSnapshot} style={{ fontSize: 11.5, padding: "5px 12px" }}>📸 Snapshot now</Btn>
+                  <Btn variant="secondary" onClick={() => setTab("update")} style={{ fontSize: 11.5, padding: "5px 12px" }}>Update balances first</Btn>
+                  <button onClick={dismissSnapBanner} title="Dismiss for this session" style={{
+                    background: "none", border: "none", color: T.textDim, cursor: "pointer", fontSize: 14, padding: "0 2px",
+                  }}>✕</button>
+                </div>
+              </div>
+            )}
             {(() => {
               // Enrich snapshots with estimated cumulative contributions across
               // investment accounts (PENSION_DC, SIPP, ISA_*, GIA). Worked
@@ -625,21 +752,53 @@ export default function App() {
               const monthlyContrib = investAccts.reduce((s, a) => s + (a.monthly_contrib || 0), 0);
               const hasContribData = currentContrib > 0;
               const now = Date.now();
-              const enriched = !hasContribData ? snapshots : snapshots.map((s) => {
+              // Real-terms mode: express each historic snapshot in today's
+              // purchasing power by inflating it forward at settings.inflation_rate.
+              // £100 from 3 years ago becomes £100 × (1+i)³ in today's money, so a
+              // flat real-terms line means wealth only kept pace with inflation.
+              const inflation = (settings.inflation_rate || 0) / 100;
+              const deflate = (value, dateStr) => {
+                if (!realTerms || !value) return value;
+                const yearsAgo = Math.max(0, (now - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+                return Math.round(value * Math.pow(1 + inflation, yearsAgo));
+              };
+              const enriched = snapshots.map((s) => {
                 const monthsBack = Math.max(0, (now - new Date(s.date).getTime()) / (1000 * 60 * 60 * 24 * 30.44));
                 const est = Math.max(0, currentContrib - monthsBack * monthlyContrib);
-                return { ...s, est_contributions: Math.round(est) };
+                return {
+                  ...s,
+                  net_worth: deflate(s.net_worth, s.date),
+                  ...(hasContribData ? { est_contributions: deflate(Math.round(est), s.date) } : {}),
+                };
               });
               return (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-                    <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Net Worth Over Time</h3>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                      <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Net Worth Over Time</h3>
+                      <div style={{ display: "flex", gap: 2 }}>
+                        {[[false, "Nominal"], [true, "Real (today's £)"]].map(([v, lbl]) => (
+                          <button key={lbl} onClick={() => setRealTerms(v)} style={{
+                            background: realTerms === v ? T.accent + "22" : "transparent",
+                            color: realTerms === v ? T.accent : T.textDim,
+                            border: `1px solid ${realTerms === v ? T.accent + "55" : "transparent"}`,
+                            borderRadius: 5, padding: "2px 9px", fontSize: 10.5, cursor: "pointer",
+                            fontWeight: realTerms === v ? 600 : 400,
+                          }}>{lbl}</button>
+                        ))}
+                      </div>
+                    </div>
                     {hasContribData && (
                       <div style={{ fontSize: 10.5, color: T.textDim }}>
                         Dashed line: estimated cumulative investment contributions ({fmtFull(currentContrib)} to date)
                       </div>
                     )}
                   </div>
+                  {realTerms && (
+                    <div style={{ fontSize: 10.5, color: T.textDim, margin: "-8px 0 10px" }}>
+                      Historic values restated in today's purchasing power at {settings.inflation_rate}%/yr — a flat line means wealth only kept pace with inflation.
+                    </div>
+                  )}
                   {snapshots.length > 0 ? (
                     <ResponsiveContainer width="100%" height={260}>
                       <AreaChart data={enriched}>
@@ -677,11 +836,12 @@ export default function App() {
               const catSnaps = snapshots.filter((s) => s.categories && Object.keys(s.categories).length > 0);
               if (catSnaps.length < 1) return null;
               const CAT_CONFIG = [
-                { key: "pensions", label: "Pensions",   color: T.purple },
-                { key: "isas",     label: "ISAs",        color: T.accent },
-                { key: "property", label: "Property",   color: T.blue },
-                { key: "cash",     label: "Cash",        color: T.green },
-                { key: "debts",    label: "Debts",       color: T.red },
+                { key: "pensions",    label: "Pensions",   color: T.purple },
+                { key: "isas",        label: "ISAs",        color: T.accent },
+                { key: "investments", label: "GIA",        color: T.amber },
+                { key: "property",    label: "Property",   color: T.blue },
+                { key: "cash",        label: "Cash",       color: T.green },
+                { key: "debts",       label: "Debts",      color: T.red },
               ];
               const data = catSnaps.map((s) => ({
                 date: s.date,
@@ -723,12 +883,12 @@ export default function App() {
             {/* Net Worth Attribution — break each period's NW delta into
                 contributions, market movement, cash flow, property, and debt
                 paydown. Sums to the actual delta; "Other" picks up anything
-                uncategorised (notably GIA, which isn't in snapshot_categories). */}
+                uncategorised (e.g. renamed/deleted accounts in old snapshots). */}
             {(() => {
               const catSnaps = snapshots.filter((s) => s.categories && Object.keys(s.categories).length > 0);
               if (catSnaps.length < 2) return null;
 
-              const INVEST_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "ISA_LISA"]);
+              const INVEST_TYPES = new Set(["PENSION_DC", "SIPP", "ISA_SS", "ISA_CASH", "ISA_LISA", "GIA"]);
               const monthlyInvestContrib = accounts
                 .filter((a) => INVEST_TYPES.has(a.type))
                 .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
@@ -750,6 +910,7 @@ export default function App() {
                 const nwDelta = (curr.net_worth || 0) - (prev.net_worth || 0);
                 const pensionsDelta = (curr.categories.pensions || 0) - (prev.categories.pensions || 0);
                 const isasDelta = (curr.categories.isas || 0) - (prev.categories.isas || 0);
+                const investmentsDelta = (curr.categories.investments || 0) - (prev.categories.investments || 0);
                 const cashDelta = (curr.categories.cash || 0) - (prev.categories.cash || 0);
                 const propertyDelta = (curr.categories.property || 0) - (prev.categories.property || 0);
                 // debts category is stored as a negative sum, so a paydown (debt
@@ -758,7 +919,7 @@ export default function App() {
                 const debtsDelta = (curr.categories.debts || 0) - (prev.categories.debts || 0);
 
                 const contrib = Math.round(monthlyInvestContrib * months);
-                const market = Math.round(pensionsDelta + isasDelta - contrib);
+                const market = Math.round(pensionsDelta + isasDelta + investmentsDelta - contrib);
                 const cash = Math.round(cashDelta);
                 const property = Math.round(propertyDelta);
                 const debt = Math.round(debtsDelta);
@@ -1023,7 +1184,7 @@ export default function App() {
                   <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
                   <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
                   <Area type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
-                  <Area type="monotone" dataKey="isas" name="ISAs" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
+                  <Area type="monotone" dataKey="isas" name="ISAs & GIA" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
                   <Line type="monotone" dataKey="upper" name="Upper (+1σ)" stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
                   <Line type="monotone" dataKey="lower" name="Lower (−1σ)" stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -2175,6 +2336,7 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
         <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
         <Tab label="Salary Sacrifice" active={activeTool === "salary-sacrifice"} onClick={() => setActiveTool("salary-sacrifice")} />
         <Tab label="Bonus Optimiser" active={activeTool === "bonus"} onClick={() => setActiveTool("bonus")} />
+        <Tab label="Marginal Rate" active={activeTool === "marginal"} onClick={() => setActiveTool("marginal")} />
         <Tab label="IHT Estimator" active={activeTool === "iht"} onClick={() => setActiveTool("iht")} />
         <Tab label="Debt Payoff" active={activeTool === "debt-payoff"} onClick={() => setActiveTool("debt-payoff")} />
       </div>
@@ -2183,6 +2345,7 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
       {activeTool === "carry-forward" && <CarryForwardTool profile={profile} settings={settings} />}
       {activeTool === "salary-sacrifice" && <SalarySacrificeTool profile={profile} settings={settings} />}
       {activeTool === "bonus" && <BonusOptimiser profile={profile} settings={settings} />}
+      {activeTool === "marginal" && <MarginalRateCurve profile={profile} settings={settings} />}
       {activeTool === "iht" && <IhtEstimator netWorth={netWorth} accounts={accounts} />}
       {activeTool === "debt-payoff" && <DebtPayoffTool accounts={accounts} />}
     </div>

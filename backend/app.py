@@ -820,12 +820,52 @@ def export_data():
     return jsonify(data)
 
 
+def _backup_database(prefix="preimport"):
+    """Write a timestamped copy of the live DB to the backup directory using
+    SQLite's online backup API. Returns the backup filename."""
+    backup_dir = Path(os.environ.get("BACKUP_DIR", str(DATA_DIR / "backups")))
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    name = f"cairn-{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.db"
+    dst = sqlite3.connect(str(backup_dir / name))
+    try:
+        get_db().backup(dst)
+    finally:
+        dst.close()
+    return name
+
+
 @app.route("/api/import", methods=["POST"])
 @require_auth
 def import_data():
     data = request.get_json()
-    db = get_db()
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Import payload must be a JSON object"}), 400
 
+    # The import is destructive (accounts and goals are wiped before
+    # re-inserting), so refuse to proceed unless we've safely stashed a copy
+    # of the current database first.
+    try:
+        backup_name = _backup_database("preimport")
+    except Exception as e:
+        return jsonify({"error": f"Pre-import backup failed — aborting import: {e}"}), 500
+
+    db = get_db()
+    try:
+        _apply_import(db, data)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return jsonify({
+            "error": f"Import failed and was rolled back: {e}",
+            "backup": backup_name,
+        }), 400
+
+    return jsonify({"ok": True, "message": "Data imported successfully", "backup": backup_name})
+
+
+def _apply_import(db, data):
+    """Apply an import payload inside the caller's transaction. Raises on any
+    malformed row — the caller rolls back, so partial imports never land."""
     if "profile" in data:
         p = data["profile"]
         db.execute("""
@@ -904,9 +944,6 @@ def import_data():
             """, (g.get("name",""), g.get("description",""), g.get("target_amount",0),
                   g.get("target_date",""), g.get("icon",""), g.get("link_type",""),
                   g.get("link_value",""), g.get("sort_order",0)))
-
-    db.commit()
-    return jsonify({"ok": True, "message": "Data imported successfully"})
 
 
 # ── AI Commentary (Claude API) ────────────────────────────────────────────────

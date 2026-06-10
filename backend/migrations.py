@@ -37,6 +37,39 @@ def _m_backfill_snapshot_categories(db):
         print(f"Backfilled snapshot_categories for {fixed} snapshot(s).")
 
 
+def _m_backfill_investments_category(db):
+    """Add the `investments` (GIA) category row to snapshots that predate it.
+
+    Snapshots taken before GIA joined _CATEGORY_KEYS have category rows but
+    no `investments` entry, so GIA balances were invisible on the stacked
+    chart. Fill it in from the stored breakdown JSON where GIA accounts can
+    be matched by name (best-effort, same convention as the main backfill).
+    """
+    import json
+
+    gia_names = {r["name"] for r in db.execute("SELECT name FROM accounts WHERE type = 'GIA'").fetchall()}
+    if not gia_names:
+        return
+
+    snaps = db.execute(
+        "SELECT s.id, s.breakdown FROM snapshots s"
+        " WHERE EXISTS (SELECT 1 FROM snapshot_categories c WHERE c.snapshot_id = s.id)"
+        " AND NOT EXISTS (SELECT 1 FROM snapshot_categories c"
+        "                 WHERE c.snapshot_id = s.id AND c.category = 'investments')"
+    ).fetchall()
+    for snap in snaps:
+        try:
+            breakdown = json.loads(snap["breakdown"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        value = sum(bal for name, bal in breakdown.items() if name in gia_names)
+        if value:
+            db.execute(
+                "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, 'investments', ?)",
+                (snap["id"], value),
+            )
+
+
 # Migrations are applied in list order. Names are permanent — they are
 # the key in `schema_migrations`. Don't rename or remove past entries.
 MIGRATIONS = [
@@ -65,6 +98,7 @@ MIGRATIONS = [
      _alter_add_column("profile", "children_count INTEGER NOT NULL DEFAULT 0")),
     ("013_profile_add_spouse_income",
      _alter_add_column("profile", "spouse_income REAL NOT NULL DEFAULT 0")),
+    ("014_backfill_investments_category", _m_backfill_investments_category),
 ]
 
 
