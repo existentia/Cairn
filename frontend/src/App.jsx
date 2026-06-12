@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
-  PieChart, Pie, Cell, AreaChart, Area, Line, XAxis, YAxis,
+  PieChart, Pie, Cell, AreaChart, ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
   Sankey, Layer, Rectangle, BarChart, Bar,
 } from "recharts";
@@ -17,6 +17,7 @@ import {
   T, DARK_THEME, LIGHT_THEME, ACCOUNT_LABELS, fmt, makeGlobalStyles,
   ttStyle, ttItemStyle, ttLabelStyle,
   MetricCard, InsightCard, Tab, Field, NumberInput, Select, Btn,
+  Ico, CairnLogo, CairnMeter, TopoPattern,
 } from "./ui.jsx";
 import FIRECalculator from "./tools/FIRECalculator.jsx";
 import CarryForwardTool from "./tools/CarryForwardTool.jsx";
@@ -52,17 +53,17 @@ function useToast() {
     <div style={{ position: "fixed", top: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
       {toasts.map((t) => {
         const colors = { success: T.green, error: T.red, info: T.blue, warning: T.amber };
-        const icons = { success: "✓", error: "✕", info: "ℹ", warning: "▲" };
+        const icons = { success: "check", error: "x", info: "info", warning: "warning" };
         return (
           <div key={t.id} style={{
             background: T.surface, border: `1px solid ${colors[t.type] || T.border}`,
             borderLeft: `3px solid ${colors[t.type] || T.accent}`,
             borderRadius: T.radius, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10,
             animation: `${t.exiting ? "toast-out" : "toast-in"} 0.3s ease forwards`,
-            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+            boxShadow: T.shadow,
           }}>
-            <span style={{ color: colors[t.type], fontSize: 14, fontWeight: 700 }}>{icons[t.type]}</span>
-            <span style={{ fontSize: 12.5, color: T.text }}>{t.message}</span>
+            <Ico name={icons[t.type] || "info"} size={14} color={colors[t.type]} />
+            <span style={{ fontSize: 13, color: T.text }}>{t.message}</span>
           </div>
         );
       })}
@@ -96,29 +97,27 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 20 }}>
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 32, width: "100%", maxWidth: 360 }}>
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 20, position: "relative", overflow: "hidden" }}>
+      <TopoPattern opacity={0.06} />
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 32, width: "100%", maxWidth: 360, position: "relative", boxShadow: T.shadowLg }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <svg width="32" height="40" viewBox="0 0 16 20" fill={T.accent} xmlns="http://www.w3.org/2000/svg" style={{ display: "block", margin: "0 auto 8px" }}>
-            <rect x="5.5" y="0"  width="5"  height="3.5" rx="0.75"/>
-            <rect x="3.5" y="5"  width="9"  height="3.5" rx="0.75"/>
-            <rect x="1.5" y="10" width="13" height="3.5" rx="0.75"/>
-            <rect x="0"   y="15" width="16" height="4"   rx="0.75"/>
-          </svg>
+          <CairnLogo width={32} style={{ display: "block", margin: "0 auto 8px" }} />
           <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Cairn</h1>
           <p style={{ fontSize: 12, color: T.textDim }}>Sign in to continue</p>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <form
+          onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}
+          style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        >
           {/* Wrap each Field so the column-flex parent doesn't apply the Field's
               `flex: 1 1 200px` to its height and inflate the gap. */}
-          <div><Field label="Username" value={username} onChange={setUsername} /></div>
-          <div><Field label="Password" value={password} onChange={setPassword} type="password"
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()} /></div>
+          <div><Field label="Username" value={username} onChange={setUsername} autoFocus autoComplete="username" /></div>
+          <div><Field label="Password" value={password} onChange={setPassword} type="password" autoComplete="current-password" /></div>
           {error && <div style={{ color: T.red, fontSize: 12 }}>{error}</div>}
-          <Btn onClick={handleSubmit} style={{ marginTop: 6, padding: "10px 16px" }}>
+          <Btn type="submit" style={{ marginTop: 6, padding: "10px 16px" }}>
             {loading ? "Signing in..." : "Sign In"}
           </Btn>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -139,22 +138,22 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
 
   const reorderBtnStyle = (disabled) => ({
     background: "none", border: "none", color: disabled ? T.textDim : T.textMuted,
-    cursor: disabled ? "default" : "pointer", padding: "1px 4px", fontSize: 11, lineHeight: 1,
+    cursor: disabled ? "default" : "pointer", padding: "1px 4px", lineHeight: 1,
     opacity: disabled ? 0.3 : 0.7,
   });
 
   return (
-    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, marginBottom: 6, overflow: "hidden" }}>
+    <div className="c-hover" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, marginBottom: 6, overflow: "hidden" }}>
       <div onClick={onToggle} style={{ display: "flex", alignItems: "center", padding: "11px 16px", cursor: "pointer", gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 500 }}>{account.name}</div>
-          <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[account.type]} · {account.provider || "—"}</div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>{account.name}</div>
+          <div style={{ fontSize: 10.5, color: T.textMuted }}>{ACCOUNT_LABELS[account.type]} · {account.provider || "—"}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {(onMoveUp || onMoveDown) && (
-            <div style={{ display: "flex", gap: 2 }} onClick={(e) => e.stopPropagation()}>
-              <button style={reorderBtnStyle(!onMoveUp)} onClick={() => onMoveUp && onMoveUp()} disabled={!onMoveUp}>▲</button>
-              <button style={reorderBtnStyle(!onMoveDown)} onClick={() => onMoveDown && onMoveDown()} disabled={!onMoveDown}>▼</button>
+            <div className="row-actions" style={{ display: "flex", gap: 2 }} onClick={(e) => e.stopPropagation()}>
+              <button style={reorderBtnStyle(!onMoveUp)} onClick={() => onMoveUp && onMoveUp()} disabled={!onMoveUp} title="Move up"><Ico name="chevronUp" size={12} /></button>
+              <button style={reorderBtnStyle(!onMoveDown)} onClick={() => onMoveDown && onMoveDown()} disabled={!onMoveDown} title="Move down"><Ico name="chevronDown" size={12} /></button>
             </div>
           )}
           <div style={{ textAlign: "right" }}>
@@ -310,6 +309,11 @@ export default function App() {
 
   // Sync mutable T to current theme on every render
   Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
+
+  // Keep the browser chrome (mobile address bar etc.) matching the theme
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isDark ? DARK_THEME.bg : LIGHT_THEME.bg);
+  }, [isDark]);
 
   const toggleTheme = () => {
     setIsDark((prev) => {
@@ -640,11 +644,11 @@ export default function App() {
         }}>
           <div onClick={(e) => e.stopPropagation()} style={{
             background: T.surface, border: `1px solid ${T.borderLight}`, borderRadius: 12,
-            padding: 24, width: "100%", maxWidth: 380, boxShadow: "0 12px 48px rgba(0,0,0,0.4)",
+            padding: 24, width: "100%", maxWidth: 380, boxShadow: T.shadowLg,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Keyboard Shortcuts</h3>
-              <button onClick={() => setShowShortcuts(false)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 16 }}>✕</button>
+              <button onClick={() => setShowShortcuts(false)} title="Close" style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: 2 }}><Ico name="x" size={15} /></button>
             </div>
             {[
               ["g  s", "Take snapshot"],
@@ -657,9 +661,9 @@ export default function App() {
               ["g  t", "Tools"],
               ["?", "Toggle this cheatsheet"],
             ].map(([keys, desc]) => (
-              <div key={keys} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12.5 }}>
+              <div key={keys} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>
                 <span style={{ color: T.textMuted }}>{desc}</span>
-                <kbd style={{ fontFamily: T.mono, fontSize: 11.5, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 8px", color: T.accent, letterSpacing: "0.1em" }}>{keys}</kbd>
+                <kbd style={{ fontFamily: T.mono, fontSize: 12, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 8px", color: T.accent, letterSpacing: "0.1em" }}>{keys}</kbd>
               </div>
             ))}
             <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 10 }}>Shortcuts are inactive while typing in a field.</div>
@@ -669,48 +673,119 @@ export default function App() {
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>
 
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 22 }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: T.accent, letterSpacing: "-0.02em", margin: 0, display: "flex", alignItems: "center", gap: 7 }}>
-              <svg width="16" height="20" viewBox="0 0 16 20" fill={T.accent} xmlns="http://www.w3.org/2000/svg">
-                <rect x="5.5" y="0"  width="5"  height="3.5" rx="0.75"/>
-                <rect x="3.5" y="5"  width="9"  height="3.5" rx="0.75"/>
-                <rect x="1.5" y="10" width="13" height="3.5" rx="0.75"/>
-                <rect x="0"   y="15" width="16" height="4"   rx="0.75"/>
-              </svg>
-              Cairn
-            </h1>
-            <p style={{ fontSize: 12, color: T.textMuted, marginTop: 3 }}>
-              {profile.name ? `${profile.name} · ` : ""}Age {age}{ytr > 0 ? ` · ${ytr}y to retirement` : ""}
-            </p>
+        {/* Header — topo contours sit behind, faded out towards the metrics */}
+        <div style={{ position: "relative" }}>
+          <div style={{
+            position: "absolute", inset: "-20px -16px -30px", overflow: "hidden", pointerEvents: "none", zIndex: 0,
+            maskImage: "linear-gradient(to bottom, black 30%, transparent)",
+            WebkitMaskImage: "linear-gradient(to bottom, black 30%, transparent)",
+          }}>
+            <TopoPattern opacity={0.07} />
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              onClick={toggleTheme}
-              title={isDark ? "Switch to light theme" : "Switch to dark theme"}
-              style={{
-                background: "none", border: `1px solid ${T.border}`, borderRadius: T.radius,
-                color: T.textMuted, cursor: "pointer", padding: "5px 10px", fontSize: 15,
-                lineHeight: 1, transition: "border-color 0.15s",
-              }}
-            >{isDark ? "☀️" : "🌙"}</button>
-            <Btn variant="secondary" onClick={takeSnapshot} style={{ fontSize: 11 }}>📸 Snapshot</Btn>
-            <Btn variant="secondary" onClick={exportData} style={{ fontSize: 11 }}>↓ Export</Btn>
-            <Btn variant="secondary" onClick={handleLogout} style={{ fontSize: 11 }}>Sign Out</Btn>
+          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 22 }}>
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, color: T.accent, letterSpacing: "-0.02em", margin: 0, display: "flex", alignItems: "center", gap: 7 }}>
+                <CairnLogo width={16} />
+                Cairn
+              </h1>
+              <p style={{ fontSize: 12, color: T.textMuted, marginTop: 3 }}>
+                {profile.name ? `${profile.name} · ` : ""}Age {age}{ytr > 0 ? ` · ${ytr}y to retirement` : ""}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                className="c-btn-secondary"
+                onClick={toggleTheme}
+                title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+                style={{
+                  background: "none", border: `1px solid ${T.border}`, borderRadius: 6,
+                  color: T.textMuted, cursor: "pointer", padding: "7px 9px", lineHeight: 1,
+                }}
+              ><Ico name={isDark ? "sun" : "moon"} size={13} /></button>
+              <Btn variant="secondary" onClick={takeSnapshot} style={{ fontSize: 10.5 }}><Ico name="camera" size={12} /> Snapshot</Btn>
+              <Btn variant="secondary" onClick={exportData} style={{ fontSize: 10.5 }}><Ico name="download" size={12} /> Export</Btn>
+              <Btn variant="secondary" onClick={handleLogout} style={{ fontSize: 10.5 }}><Ico name="signout" size={12} /> Sign Out</Btn>
+            </div>
           </div>
         </div>
 
-        {/* Metrics */}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
-          <MetricCard label="Net Worth" value={fmtFull(netWorth)} color={netWorth >= 0 ? T.green : T.red} sub={netWorth >= 0 ? "Assets exceed liabilities" : "Liabilities exceed assets"} />
-          <MetricCard label="Total Assets" value={fmtFull(totalAssets)} color={T.green} sub={`${assets.length} accounts`} />
-          <MetricCard label="Total Liabilities" value={fmtFull(totalLiabilities)} color={T.red} sub={`${liabilities.length} accounts`} />
-          <MetricCard label="Monthly Savings" value={fmtFull(monthlySavings)} color={T.blue} sub="Regular contributions" />
-        </div>
+        {/* Metrics — hero net worth with delta + sparkline, then supporting cards */}
+        {(() => {
+          const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
+          const today = new Date().toISOString().slice(0, 10);
+          // Compare live values against the most recent snapshot before today,
+          // so taking a snapshot right now doesn't zero out the deltas.
+          const prior = [...sorted].reverse().find((s) => s.date < today) || null;
+          const sinceLabel = prior ? new Date(prior.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null;
+          const mkDelta = (curr, prevVal, goodWhenUp = true) => {
+            if (!prior || prevVal == null) return null;
+            const diff = curr - prevVal;
+            if (Math.round(diff) === 0) return null;
+            const pct = prevVal !== 0 ? (diff / Math.abs(prevVal)) * 100 : null;
+            return {
+              text: `${diff >= 0 ? "+" : "−"}${fmtFull(Math.abs(diff))}${pct != null ? ` (${diff >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)` : ""}`,
+              up: diff >= 0,
+              good: goodWhenUp ? diff >= 0 : diff <= 0,
+              since: sinceLabel,
+            };
+          };
+          const nwDelta = mkDelta(netWorth, prior?.net_worth);
+          const assetsDelta = mkDelta(totalAssets, prior?.total_assets);
+          const liabDelta = mkDelta(totalLiabilities, prior?.total_liabilities != null ? Math.abs(prior.total_liabilities) : null, false);
+          const spark = sorted.slice(-12).map((s) => ({ date: s.date, nw: s.net_worth }));
+          return (
+            <>
+              <div style={{
+                background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
+                padding: "18px 22px", marginBottom: 10, display: "flex", alignItems: "center",
+                gap: 24, flexWrap: "wrap",
+              }}>
+                <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8, fontWeight: 500 }}>Net Worth</div>
+                  <div style={{ fontSize: 38, fontWeight: 700, color: netWorth >= 0 ? T.text : T.red, fontFamily: T.mono, letterSpacing: "-0.03em", lineHeight: 1.05 }}>
+                    {fmtFull(netWorth)}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
+                    {nwDelta ? (
+                      <>
+                        <Ico name={nwDelta.up ? "deltaUp" : "deltaDown"} size={9} color={nwDelta.good ? T.green : T.red} />
+                        <span style={{ color: nwDelta.good ? T.green : T.red, fontFamily: T.mono, fontWeight: 600 }}>{nwDelta.text}</span>
+                        <span style={{ color: T.textDim }}>since {nwDelta.since}</span>
+                      </>
+                    ) : (
+                      <span style={{ color: T.textDim }}>{netWorth >= 0 ? "Assets exceed liabilities" : "Liabilities exceed assets"}</span>
+                    )}
+                  </div>
+                </div>
+                {spark.length >= 2 && (
+                  <div style={{ flex: "1 1 280px", height: 76, minWidth: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={spark} margin={{ top: 6, right: 2, bottom: 2, left: 2 }}>
+                        <defs>
+                          <linearGradient id="heroSparkG" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={T.accent} stopOpacity={0.25} />
+                            <stop offset="100%" stopColor={T.accent} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <YAxis hide domain={["dataMin", "dataMax"]} />
+                        <XAxis hide dataKey="date" />
+                        <Area isAnimationActive={false} type="monotone" dataKey="nw" stroke={T.accent} strokeWidth={1.5} fill="url(#heroSparkG)" dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+              <div className="c-metrics" style={{ marginBottom: 20 }}>
+                <MetricCard label="Total Assets" value={fmtFull(totalAssets)} color={T.green} sub={`${assets.length} accounts`} delta={assetsDelta} />
+                <MetricCard label="Total Liabilities" value={fmtFull(totalLiabilities)} color={T.red} sub={`${liabilities.length} accounts`} delta={liabDelta} />
+                <MetricCard label="Monthly Savings" value={fmtFull(monthlySavings)} color={T.blue} sub="Regular contributions" />
+              </div>
+            </>
+          );
+        })()}
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
+        <div className="c-tabs">
           {[["overview", "Overview"], ["accounts", "Accounts"], ["update", "Update Balances"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
             <Tab key={id} label={l} active={tab === id} onClick={() => setTab(id)} />
           ))}
@@ -726,17 +801,17 @@ export default function App() {
                 borderRadius: T.radius, padding: "12px 16px",
                 display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10,
               }}>
-                <div style={{ fontSize: 12.5, color: T.textMuted }}>
+                <div style={{ fontSize: 13, color: T.textMuted }}>
                   {daysSinceSnapshot == null
                     ? <>No snapshots recorded yet — log your first to start the net worth chart.</>
                     : <>Last snapshot was <strong style={{ color: T.amber }}>{daysSinceSnapshot} days ago</strong> ({lastSnapshotDate}) — log this month?</>}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Btn onClick={takeSnapshot} style={{ fontSize: 11.5, padding: "5px 12px" }}>📸 Snapshot now</Btn>
-                  <Btn variant="secondary" onClick={() => setTab("update")} style={{ fontSize: 11.5, padding: "5px 12px" }}>Update balances first</Btn>
+                  <Btn onClick={takeSnapshot} style={{ fontSize: 12, padding: "5px 12px" }}><Ico name="camera" size={12} /> Snapshot now</Btn>
+                  <Btn variant="secondary" onClick={() => setTab("update")} style={{ fontSize: 12, padding: "5px 12px" }}>Update balances first</Btn>
                   <button onClick={dismissSnapBanner} title="Dismiss for this session" style={{
-                    background: "none", border: "none", color: T.textDim, cursor: "pointer", fontSize: 14, padding: "0 2px",
-                  }}>✕</button>
+                    background: "none", border: "none", color: T.textDim, cursor: "pointer", padding: 2,
+                  }}><Ico name="x" size={13} /></button>
                 </div>
               </div>
             )}
@@ -801,15 +876,17 @@ export default function App() {
                   )}
                   {snapshots.length > 0 ? (
                     <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart data={enriched}>
+                      {/* ComposedChart, not AreaChart — recharts silently drops
+                          the <Line> (est. contributions) inside an AreaChart */}
+                      <ComposedChart data={enriched}>
                         <defs><linearGradient id="nwG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.accent} stopOpacity={0.3} /><stop offset="100%" stopColor={T.accent} stopOpacity={0} /></linearGradient></defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
-                        <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+                        <XAxis dataKey="date" tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                        <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt} />
                         <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
-                        <Area type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
+                        <Area isAnimationActive={false} type="monotone" dataKey="net_worth" stroke={T.accent} fill="url(#nwG)" strokeWidth={2} dot={false} name="Net Worth" />
                         {hasContribData && (
-                          <Line type="monotone" dataKey="est_contributions" stroke={T.purple} strokeDasharray="4 3" strokeWidth={1.5} dot={false} name="Est. contributions" />
+                          <Line isAnimationActive={false} type="monotone" dataKey="est_contributions" stroke={T.purple} strokeDasharray="4 3" strokeWidth={1.5} dot={false} name="Est. contributions" />
                         )}
                         {settings.net_worth_target > 0 && (
                           <ReferenceLine
@@ -817,14 +894,14 @@ export default function App() {
                             stroke={T.amber}
                             strokeDasharray="5 4"
                             strokeWidth={1.5}
-                            label={{ value: `Target: ${fmt(settings.net_worth_target)}${settings.net_worth_target_date ? ` by ${settings.net_worth_target_date.slice(0, 7)}` : ""}`, fill: T.amber, fontSize: 10, position: "insideTopLeft" }}
+                            label={{ value: `Target: ${fmt(settings.net_worth_target)}${settings.net_worth_target_date ? ` by ${settings.net_worth_target_date.slice(0, 7)}` : ""}`, fill: T.amber, fontSize: 10.5, position: "insideTopLeft" }}
                           />
                         )}
-                      </AreaChart>
+                      </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
                     <div style={{ padding: 40, textAlign: "center", color: T.textDim, fontSize: 13 }}>
-                      No snapshots yet. Click <strong>📸 Snapshot</strong> to record your current net worth.
+                      No snapshots yet. Click <strong>Snapshot</strong> to record your current net worth.
                     </div>
                   )}
                 </div>
@@ -853,7 +930,7 @@ export default function App() {
               return (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
                   <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Asset Mix Over Time</h3>
-                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>How your asset categories have grown with each snapshot</p>
+                  <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px" }}>How your asset categories have grown with each snapshot</p>
                   <ResponsiveContainer width="100%" height={240}>
                     <AreaChart data={data}>
                       <defs>
@@ -864,13 +941,13 @@ export default function App() {
                           </linearGradient>
                         ))}
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
-                      <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                      <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt} />
                       <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v, name) => [fmtFull(v), name]} />
-                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      <Legend wrapperStyle={{ fontSize: 10.5, paddingTop: 8 }} />
                       {activeCats.map(({ key, label, color }) => (
-                        <Area key={key} type="monotone" dataKey={key} name={label}
+                        <Area isAnimationActive={false} key={key} type="monotone" dataKey={key} name={label}
                           stackId={key === "debts" ? undefined : "assets"}
                           stroke={color} fill={`url(#sg-${key})`} strokeWidth={1.5} dot={false} />
                       ))}
@@ -956,20 +1033,20 @@ export default function App() {
               return (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
                   <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Net Worth Attribution</h3>
-                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px", lineHeight: 1.5 }}>
+                  <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px", lineHeight: 1.5 }}>
                     Each bar splits the period's net-worth change into contributions, market movement on pensions/ISAs, cash-flow shift, property revaluation, and debt paydown.
                     Contributions assume your current monthly rates held historically; cash flow reflects current/savings balance shifts and will be noisy month-to-month.
                   </p>
                   <ResponsiveContainer width="100%" height={260}>
                     <BarChart data={data}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
-                      <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={(v) => v.slice(0, 7)} />
+                      <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt} />
                       <Tooltip content={<AttribTooltip />} cursor={{ fill: T.borderLight, opacity: 0.2 }} />
-                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      <Legend wrapperStyle={{ fontSize: 10.5, paddingTop: 8 }} />
                       <ReferenceLine y={0} stroke={T.border} />
                       {activeConfig.map(({ key, label, color }) => (
-                        <Bar key={key} dataKey={key} name={label} stackId="atb" fill={color} />
+                        <Bar isAnimationActive={false} key={key} dataKey={key} name={label} stackId="atb" fill={color} />
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
@@ -984,15 +1061,24 @@ export default function App() {
                   <>
                     <ResponsiveContainer width="100%" height={220}>
                       <PieChart>
-                        <Pie data={allocationData} cx="50%" cy="50%" innerRadius={50} outerRadius={82} paddingAngle={3} dataKey="value">
+                        <Pie isAnimationActive={false} data={allocationData} cx="50%" cy="50%" innerRadius={50} outerRadius={82} paddingAngle={3} dataKey="value">
                           {allocationData.map((_, i) => <Cell key={i} fill={T.chartPalette[i % T.chartPalette.length]} />)}
                         </Pie>
+                        {/* Total in the donut hole — strongest position in the card */}
+                        <text x="50%" y="50%" dy={-2} textAnchor="middle" dominantBaseline="central"
+                          fill={T.text} fontSize={17} fontWeight={700} fontFamily={T.mono} letterSpacing="-0.02em">
+                          {fmt(totalAssets)}
+                        </text>
+                        <text x="50%" y="50%" dy={16} textAnchor="middle" dominantBaseline="central"
+                          fill={T.textDim} fontSize={8.5} fontWeight={600} letterSpacing="0.08em">
+                          TOTAL ASSETS
+                        </text>
                         <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 14px", marginTop: 6 }}>
                       {allocationData.map((d, i) => (
-                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.textMuted }}>
+                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: T.textMuted }}>
                           <div style={{ width: 8, height: 8, borderRadius: 2, background: T.chartPalette[i % T.chartPalette.length] }} />
                           {d.name}: {fmtFull(d.value)}
                         </div>
@@ -1006,7 +1092,7 @@ export default function App() {
                 <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Key Insights</h3>
                 {insights.slice(0, 4).map((ins, i) => <InsightCard key={i} insight={ins} />)}
                 {insights.length > 4 && (
-                  <Btn variant="secondary" onClick={() => setTab("advisor")} style={{ marginTop: 6, fontSize: 11 }}>
+                  <Btn variant="secondary" onClick={() => setTab("advisor")} style={{ marginTop: 6, fontSize: 10.5 }}>
                     View all {insights.length} insights →
                   </Btn>
                 )}
@@ -1025,12 +1111,12 @@ export default function App() {
               return (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
                   <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Portfolio Performance</h3>
-                  <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>Contributions vs current value · Gain calculated as growth above total money invested</p>
+                  <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px" }}>Contributions vs current value · Gain calculated as growth above total money invested</p>
                   <div style={{ overflowX: "auto" }}>
                     {/* Header */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "5px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 2 }}>
                       {["Account", "Contributed", "Current Value", "Gain / Loss", "Return"].map((h, i) => (
-                        <div key={h} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: i > 0 ? "right" : "left" }}>{h}</div>
+                        <div key={h} style={{ fontSize: 10.5, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: i > 0 ? "right" : "left" }}>{h}</div>
                       ))}
                     </div>
                     {investAccounts.map((a) => {
@@ -1040,7 +1126,7 @@ export default function App() {
                       return (
                         <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "7px 8px", borderBottom: `1px solid ${T.border}22`, alignItems: "center" }}>
                           <div>
-                            <div style={{ fontSize: 12.5, fontWeight: 500 }}>{a.name}</div>
+                            <div style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</div>
                             <div style={{ fontSize: 10.5, color: T.textDim }}>{ACCOUNT_LABELS[a.type]}{a.provider ? ` · ${a.provider}` : ""}</div>
                           </div>
                           <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", color: T.textMuted }}>{fmtFull(a.total_contributed)}</div>
@@ -1063,7 +1149,7 @@ export default function App() {
                       const gainColor = totalGain >= 0 ? T.green : T.red;
                       return (
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 90px 72px", gap: 8, padding: "8px 8px 2px", alignItems: "center", borderTop: `1px solid ${T.border}`, marginTop: 2 }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Total</div>
+                          <div style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Total</div>
                           <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 600, color: T.textMuted }}>{fmtFull(totalContrib)}</div>
                           <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 600 }}>{fmtFull(totalValue)}</div>
                           <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right", fontWeight: 700, color: gainColor }}>
@@ -1103,8 +1189,8 @@ export default function App() {
 
               {/* Search & filter bar */}
               <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, flex: "1 1 180px", minWidth: 160 }}>
-                  <span style={{ padding: "0 8px", color: T.textDim, fontSize: 13 }}>⌕</span>
+                <div className="c-field" style={{ display: "flex", alignItems: "center", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, flex: "1 1 180px", minWidth: 160 }}>
+                  <span style={{ padding: "0 8px", color: T.textDim, display: "flex" }}><Ico name="search" size={12} /></span>
                   <input
                     value={accountSearch}
                     onChange={(e) => setAccountSearch(e.target.value)}
@@ -1112,7 +1198,7 @@ export default function App() {
                     style={{ flex: 1, background: "transparent", border: "none", color: T.text, padding: "7px 8px 7px 0", fontSize: 13, outline: "none", fontFamily: T.font }}
                   />
                   {accountSearch && (
-                    <button onClick={() => setAccountSearch("")} style={{ background: "none", border: "none", color: T.textDim, cursor: "pointer", padding: "0 8px", fontSize: 13 }}>✕</button>
+                    <button onClick={() => setAccountSearch("")} title="Clear search" style={{ background: "none", border: "none", color: T.textDim, cursor: "pointer", padding: "0 8px" }}><Ico name="x" size={12} /></button>
                   )}
                 </div>
                 {["all", "assets", "liabilities"].map((f) => (
@@ -1120,7 +1206,7 @@ export default function App() {
                     background: accountTypeFilter === f ? T.surface : "transparent",
                     color: accountTypeFilter === f ? T.accent : T.textMuted,
                     border: `1px solid ${accountTypeFilter === f ? T.border : "transparent"}`,
-                    borderRadius: 6, padding: "7px 13px", fontSize: 12.5, cursor: "pointer", fontWeight: accountTypeFilter === f ? 600 : 400,
+                    borderRadius: 6, padding: "7px 13px", fontSize: 13, cursor: "pointer", fontWeight: accountTypeFilter === f ? 600 : 400,
                     textTransform: "capitalize",
                   }}>{f}</button>
                 ))}
@@ -1170,7 +1256,7 @@ export default function App() {
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Investment Growth Projection</h3>
-              <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
+              <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px" }}>
                 Real returns ({settings.growth_rate}% growth − {settings.inflation_rate}% inflation) · Today's money · ±1σ envelope (≈68% confidence) assumes {Math.round(FORECAST_SIGMA_ANNUAL * 100)}% annual volatility under a lognormal model
               </p>
               <ResponsiveContainer width="100%" height={340}>
@@ -1179,15 +1265,15 @@ export default function App() {
                     <linearGradient id="pG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.blue} stopOpacity={0.2} /><stop offset="100%" stopColor={T.blue} stopOpacity={0} /></linearGradient>
                     <linearGradient id="iG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.green} stopOpacity={0.2} /><stop offset="100%" stopColor={T.green} stopOpacity={0} /></linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: T.textDim }} />
-                  <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+                  <XAxis dataKey="year" tick={{ fontSize: 10.5, fill: T.textDim }} />
+                  <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt} />
                   <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Year ${v}`} />
-                  <Area type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
-                  <Area type="monotone" dataKey="isas" name="ISAs & GIA" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
-                  <Line type="monotone" dataKey="upper" name="Upper (+1σ)" stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
-                  <Line type="monotone" dataKey="lower" name="Lower (−1σ)" stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area isAnimationActive={false} type="monotone" dataKey="pensions" name="Pensions" stroke={T.blue} fill="url(#pG)" strokeWidth={2} stackId="1" />
+                  <Area isAnimationActive={false} type="monotone" dataKey="isas" name="ISAs & GIA" stroke={T.green} fill="url(#iG)" strokeWidth={2} stackId="1" />
+                  <Line isAnimationActive={false} type="monotone" dataKey="upper" name="Upper (+1σ)" stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
+                  <Line isAnimationActive={false} type="monotone" dataKey="lower" name="Lower (−1σ)" stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
+                  <Legend wrapperStyle={{ fontSize: 10.5 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -1248,8 +1334,8 @@ export default function App() {
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 14px" }}>Data Management</h3>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn variant="secondary" onClick={exportData}>↓ Export All Data</Btn>
-                <Btn variant="secondary" onClick={takeSnapshot}>📸 Take Snapshot Now</Btn>
+                <Btn variant="secondary" onClick={exportData}><Ico name="download" size={12} /> Export All Data</Btn>
+                <Btn variant="secondary" onClick={takeSnapshot}><Ico name="camera" size={12} /> Take Snapshot Now</Btn>
               </div>
             </div>
           </div>
@@ -1305,7 +1391,7 @@ function ProfileSettings({ profile, onSave, saving }) {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <Field label="Employer Matches Up To" type="number" value={form.employer_match_max_pct ?? 0} onChange={(v) => upd("employer_match_max_pct", v)} suffix="%" small />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
-          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
             The maximum employee % your employer will match. Leave at 0 if you don't have a match scheme. Advisor will warn if you're contributing below this threshold.
           </span>
         </div>
@@ -1314,7 +1400,7 @@ function ProfileSettings({ profile, onSave, saving }) {
         <Field label="Children Claiming CB For" type="number" value={form.children_count ?? 0} onChange={(v) => upd("children_count", v)} small />
         <Field label="Spouse Income (annual)" type="number" value={form.spouse_income ?? 0} onChange={(v) => upd("spouse_income", v)} prefix="£" />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
-          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
             Used by the advisor: children for HICBC alerts (£60k–£80k), spouse income for Marriage Allowance opportunities. Leave both at 0 if not applicable.
           </span>
         </div>
@@ -1322,7 +1408,7 @@ function ProfileSettings({ profile, onSave, saving }) {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? 11500} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
-          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
             Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default £11,500 is the full new State Pension (2025/26).
           </span>
         </div>
@@ -1352,14 +1438,14 @@ function AssumptionSettings({ settings, onSave, saving }) {
         <Field label="Net Worth Target" type="number" value={form.net_worth_target ?? 0} onChange={(v) => upd("net_worth_target", v)} prefix="£" />
         <Field label="Target Date" type="month" value={(form.net_worth_target_date || "").slice(0, 7)} onChange={(v) => upd("net_worth_target_date", v ? v + "-01" : "")} />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
-          <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
             Sets a dashed target line on the net worth chart. Leave at 0 to hide.
           </span>
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <div style={{ flex: "0 0 auto" }}>
-          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Tax Region</div>
+          <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Tax Region</div>
           <div style={{ display: "flex", gap: 4 }}>
             {[["scotland", "Scotland"], ["ruk", "England / Wales / NI"]].map(([val, lbl]) => (
               <button key={val} onClick={() => upd("tax_region", val)} style={{
@@ -1436,7 +1522,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>Tax Year Summary — {taxYearLabel}</h3>
-          <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>Estimated at current contribution rates</p>
+          <p style={{ fontSize: 10.5, color: T.textDim, margin: 0 }}>Estimated at current contribution rates</p>
         </div>
         <div style={{ background: daysLeft <= 30 ? T.red + "22" : daysLeft <= 90 ? T.amber + "22" : T.bg,
           border: `1px solid ${daysLeft <= 30 ? T.red : daysLeft <= 90 ? T.amber : T.border}`,
@@ -1450,12 +1536,12 @@ function TaxYearSummary({ profile, accounts, settings }) {
         {/* ISA */}
         <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>ISA Allowance</span>
-            <span style={{ fontSize: 11, fontFamily: T.mono, color: isaUsedPct >= 100 ? T.green : T.accent }}>{isaUsedPct.toFixed(0)}%</span>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted }}>ISA Allowance</span>
+            <span style={{ fontSize: 10.5, fontFamily: T.mono, color: isaUsedPct >= 100 ? T.green : T.accent }}>{isaUsedPct.toFixed(0)}%</span>
           </div>
-          <Bar pct={isaUsedPct} color={isaUsedPct >= 100 ? T.green : T.accent} />
+          <Bar isAnimationActive={false} pct={isaUsedPct} color={isaUsedPct >= 100 ? T.green : T.accent} />
           <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(isaAnnualRate)} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(isaAllowance)}</span></div>
-          <div style={{ fontSize: 11, color: isaRemaining > 0 ? T.textDim : T.green, marginTop: 2 }}>
+          <div style={{ fontSize: 10.5, color: isaRemaining > 0 ? T.textDim : T.green, marginTop: 2 }}>
             {isaRemaining > 0 ? `${fmtFull(isaRemaining)} remaining (${fmtFull(Math.round(isaRemaining / Math.max(1, daysLeft / 30)))}/mo to use it)` : "Allowance maxed ✓"}
           </div>
         </div>
@@ -1463,29 +1549,29 @@ function TaxYearSummary({ profile, accounts, settings }) {
         {/* Pension */}
         <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>Pension Annual Allowance</span>
-            <span style={{ fontSize: 11, fontFamily: T.mono, color: pensionUsedPct >= 100 ? T.green : T.blue }}>{pensionUsedPct.toFixed(0)}%</span>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted }}>Pension Annual Allowance</span>
+            <span style={{ fontSize: 10.5, fontFamily: T.mono, color: pensionUsedPct >= 100 ? T.green : T.blue }}>{pensionUsedPct.toFixed(0)}%</span>
           </div>
-          <Bar pct={pensionUsedPct} color={pensionUsedPct >= 100 ? T.green : T.blue} />
+          <Bar isAnimationActive={false} pct={pensionUsedPct} color={pensionUsedPct >= 100 ? T.green : T.blue} />
           <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(Math.round(pensionAnnual))} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(pensionAllowance)}</span></div>
-          <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+          <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>
             {pensionRemaining > 0 ? `${fmtFull(Math.round(pensionRemaining))} remaining · workplace + DC + SIPP` : "Annual allowance reached ✓"}
           </div>
         </div>
 
         {/* Personal Allowance */}
         <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${taper > 0 ? T.red + "55" : T.border}` }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6 }}>Personal Allowance</div>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted, marginBottom: 6 }}>Personal Allowance</div>
           {taper > 0 ? (
             <>
               <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: T.red }}>{fmtFull(effectivePA)}</div>
-              <div style={{ fontSize: 11, color: T.red, marginTop: 2 }}>Tapered — lost {fmtFull(taper)} (salary over £100k)</div>
+              <div style={{ fontSize: 10.5, color: T.red, marginTop: 2 }}>Tapered — lost {fmtFull(taper)} (salary over £100k)</div>
               <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 3 }}>Sacrifice to £100k via pension to restore full PA</div>
             </>
           ) : (
             <>
               <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono }}>{fmtFull(effectivePA)}</div>
-              <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>Full allowance · 2025/26 rate</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Full allowance · 2025/26 rate</div>
             </>
           )}
         </div>
@@ -1494,12 +1580,12 @@ function TaxYearSummary({ profile, accounts, settings }) {
         {hasLISA && (
           <div style={{ flex: "1 1 220px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>LISA Sub-Allowance</span>
-              <span style={{ fontSize: 11, fontFamily: T.mono, color: lisaUsedPct >= 100 ? T.green : T.purple }}>{lisaUsedPct.toFixed(0)}%</span>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted }}>LISA Sub-Allowance</span>
+              <span style={{ fontSize: 10.5, fontFamily: T.mono, color: lisaUsedPct >= 100 ? T.green : T.purple }}>{lisaUsedPct.toFixed(0)}%</span>
             </div>
-            <Bar pct={lisaUsedPct} color={lisaUsedPct >= 100 ? T.green : T.purple} />
+            <Bar isAnimationActive={false} pct={lisaUsedPct} color={lisaUsedPct >= 100 ? T.green : T.purple} />
             <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, marginTop: 4 }}>{fmtFull(lisaAnnualRate)} <span style={{ fontSize: 10.5, color: T.textDim, fontWeight: 400 }}>of {fmtFull(LISA_ANNUAL_ALLOWANCE)}</span></div>
-            <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+            <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>
               {lisaBonus > 0 ? `Expected bonus: ${fmtFull(lisaBonus)}/yr` : "25% gov bonus on contributions"} · until age {LISA_CONTRIB_MAX_AGE}
             </div>
           </div>
@@ -1552,7 +1638,7 @@ function AdvisorTab({ insights }) {
     background: active ? T.surfaceHover : "transparent",
     color: active ? T.text : T.textDim,
     border: `1px solid ${active ? T.borderLight : "transparent"}`,
-    borderRadius: 6, padding: "4px 10px", fontSize: 11.5,
+    borderRadius: 6, padding: "4px 10px", fontSize: 12,
     cursor: "pointer", fontWeight: active ? 500 : 400,
   });
 
@@ -1561,9 +1647,9 @@ function AdvisorTab({ insights }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 3px" }}>Financial Insights</h3>
-          <p style={{ fontSize: 11.5, color: T.textDim, margin: 0 }}>Rule-based analysis · Not regulated financial advice</p>
+          <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>Rule-based analysis · Not regulated financial advice</p>
         </div>
-        <div style={{ fontSize: 11, color: T.textDim, paddingTop: 4 }}>
+        <div style={{ fontSize: 10.5, color: T.textDim, paddingTop: 4 }}>
           {filtered.length} of {insights.length} insight{insights.length !== 1 ? "s" : ""}
         </div>
       </div>
@@ -1733,7 +1819,7 @@ function CashflowSankey({ profile, accounts, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>Annual Cashflow</h3>
-          <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>
+          <p style={{ fontSize: 10.5, color: T.textDim, margin: 0 }}>
             Where your {fmtFull(profile.gross_salary)} gross salary goes each year · {settings.tax_region === "scotland" ? "Scottish" : "rUK"} tax bands · Spending is residual (take-home minus savings & debt)
           </p>
         </div>
@@ -1779,7 +1865,7 @@ function BulkUpdateSectionHeader({ title }) {
     }}>
       {[title, "Type", "Current", "New balance", "Δ"].map((h, i) => (
         <div key={i} style={{
-          fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase",
+          fontSize: 10.5, color: T.textDim, fontWeight: 600, textTransform: "uppercase",
           letterSpacing: "0.04em", textAlign: i === 4 ? "right" : "left",
         }}>{h}</div>
       ))}
@@ -1797,7 +1883,7 @@ function BulkUpdateRow({ account, currentBalance, onChange }) {
       background: changed ? T.accent + "10" : "transparent", borderRadius: changed ? 4 : 0,
     }}>
       <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{account.name}</div>
-      <div style={{ fontSize: 11, color: T.textMuted }}>{ACCOUNT_LABELS[account.type] || account.type}</div>
+      <div style={{ fontSize: 10.5, color: T.textMuted }}>{ACCOUNT_LABELS[account.type] || account.type}</div>
       <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(account.balance)}</div>
       <NumberInput
         value={currentBalance}
@@ -1808,7 +1894,7 @@ function BulkUpdateRow({ account, currentBalance, onChange }) {
           fontFamily: T.mono, outline: "none", fontWeight: changed ? 600 : 400,
         }}
       />
-      <div style={{ fontSize: 11.5, fontFamily: T.mono, textAlign: "right",
+      <div style={{ fontSize: 12, fontFamily: T.mono, textAlign: "right",
         color: !changed ? T.textDim : rowDelta > 0 ? T.green : T.red }}>
         {changed ? `${rowDelta >= 0 ? "+" : ""}${fmtFull(rowDelta)}` : "—"}
       </div>
@@ -1873,7 +1959,7 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
       {/* Intro */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Update All Balances</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: 0, lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: 0, lineHeight: 1.6 }}>
           Edit every account in one go. When you save, changed balances are written and a snapshot is recorded for today.
           {lastSnapshot && (
             <> Last snapshot was <strong style={{ color: T.textMuted }}>{lastSnapshot.date}</strong>{daysSinceLast != null && ` — ${daysSinceLast} day${daysSinceLast !== 1 ? "s" : ""} ago`}.</>
@@ -1927,9 +2013,9 @@ function BulkUpdateTab({ accounts, snapshots, onSave, saving }) {
       <div style={{
         background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
         padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center",
-        flexWrap: "wrap", gap: 10, position: "sticky", bottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+        flexWrap: "wrap", gap: 10, position: "sticky", bottom: 12, boxShadow: T.shadow,
       }}>
-        <div style={{ fontSize: 12.5, color: T.textMuted }}>
+        <div style={{ fontSize: 13, color: T.textMuted }}>
           {changedCount === 0
             ? "No changes yet. Edit any balance to enable saving."
             : <>
@@ -1987,7 +2073,7 @@ function SnapshotCsvImport({ onImported, addToast }) {
   return (
     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
       <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Import Snapshots (CSV)</h3>
-      <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 12px", lineHeight: 1.6 }}>
+      <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 12px", lineHeight: 1.6 }}>
         Bootstrap historic net-worth data from a spreadsheet. CSV must have a header with at minimum <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>date</code> and <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>net_worth</code> columns; <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>total_assets</code> and <code style={{ background: T.bg, padding: "1px 5px", borderRadius: 3 }}>total_liabilities</code> are optional.
         Dates use YYYY-MM-DD. Re-importing a date overwrites the existing row.
       </p>
@@ -2004,7 +2090,7 @@ function SnapshotCsvImport({ onImported, addToast }) {
       />
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
         {preview && (
-          <div style={{ fontSize: 11.5, color: preview.hasDate && preview.hasNetWorth ? T.textMuted : T.amber }}>
+          <div style={{ fontSize: 12, color: preview.hasDate && preview.hasNetWorth ? T.textMuted : T.amber }}>
             {preview.rows} row{preview.rows !== 1 ? "s" : ""} detected · header: <span style={{ fontFamily: T.mono }}>{preview.header.join(", ")}</span>
             {!preview.hasDate && " · missing 'date' column"}
             {!preview.hasNetWorth && " · missing 'net_worth' column"}
@@ -2030,7 +2116,7 @@ function SnapshotCsvImport({ onImported, addToast }) {
           {result.errors.length > 0 && (
             <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
               {result.errors.map((err, i) => (
-                <li key={i} style={{ color: T.red, fontSize: 11.5 }}>{err}</li>
+                <li key={i} style={{ color: T.red, fontSize: 12 }}>{err}</li>
               ))}
             </ul>
           )}
@@ -2072,9 +2158,9 @@ function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: expanded ? 14 : 0 }}>
         <div>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Snapshot History</h3>
-          {!expanded && <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>{snapshots.length} snapshots recorded</div>}
+          {!expanded && <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>{snapshots.length} snapshots recorded</div>}
         </div>
-        <Btn variant="secondary" onClick={() => setExpanded(!expanded)} style={{ fontSize: 11 }}>
+        <Btn variant="secondary" onClick={() => setExpanded(!expanded)} style={{ fontSize: 10.5 }}>
           {expanded ? "Hide" : "Edit History"}
         </Btn>
       </div>
@@ -2087,7 +2173,7 @@ function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
             {/* Header row */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${T.border}`, marginBottom: 4 }}>
               {["Date", "Net Worth", "Assets", "Liabilities", ""].map((h, i) => (
-                <div key={i} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</div>
+                <div key={i} style={{ fontSize: 10.5, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</div>
               ))}
             </div>
 
@@ -2110,11 +2196,11 @@ function SnapshotHistoryManager({ snapshots, onUpdate, onDelete }) {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, padding: "7px 8px", borderBottom: `1px solid ${T.border}22`, alignItems: "center" }}>
                     <div style={{ fontSize: 12, fontFamily: T.mono }}>{snap.date}</div>
                     <div style={{ fontSize: 12, fontFamily: T.mono, color: snap.net_worth >= 0 ? T.green : T.red, fontWeight: 600 }}>{fmtFull(snap.net_worth)}</div>
-                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_assets || 0)}</div>
-                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_liabilities || 0)}</div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_assets || 0)}</div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted, fontFamily: T.mono }}>{fmtFull(snap.total_liabilities || 0)}</div>
                     <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={() => startEdit(snap)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "2px 8px", fontSize: 11 }}>Edit</button>
-                      <button onClick={() => onDelete(snap.id)} style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "2px 8px", fontSize: 11 }}>✕</button>
+                      <button onClick={() => startEdit(snap)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "2px 8px", fontSize: 10.5 }}>Edit</button>
+                      <button onClick={() => onDelete(snap.id)} title="Delete snapshot" style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "2px 8px" }}><Ico name="x" size={11} /></button>
                     </div>
                   </div>
                 )}
@@ -2171,12 +2257,12 @@ function GoalCard({ goal, currentValue, onEdit, onDelete }) {
           {goal.icon && <span style={{ fontSize: 22 }}>{goal.icon}</span>}
           <div>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{goal.name}</div>
-            {goal.description && <div style={{ fontSize: 11, color: T.textDim, marginTop: 1 }}>{goal.description}</div>}
+            {goal.description && <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 1 }}>{goal.description}</div>}
           </div>
         </div>
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <button onClick={onEdit} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>Edit</button>
-          <button onClick={onDelete} style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>✕</button>
+          <button onClick={onEdit} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 4, color: T.textMuted, cursor: "pointer", padding: "3px 9px", fontSize: 10.5 }}>Edit</button>
+          <button onClick={onDelete} title="Delete goal" style={{ background: "none", border: `1px solid ${T.red}44`, borderRadius: 4, color: T.red, cursor: "pointer", padding: "3px 9px" }}><Ico name="x" size={11} /></button>
         </div>
       </div>
 
@@ -2196,9 +2282,17 @@ function GoalCard({ goal, currentValue, onEdit, onDelete }) {
             </div>
           )}
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color }}>{progress.toFixed(0)}%</div>
-          {done && <div style={{ fontSize: 10, color: T.green, fontWeight: 600 }}>ACHIEVED ✓</div>}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
+          {/* The cairn builds as you near the target — one stone per quartile */}
+          <CairnMeter pct={progress} size={24} color={color} style={{ marginBottom: 3 }} />
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color }}>{progress.toFixed(0)}%</div>
+            {done && (
+              <div style={{ display: "flex", alignItems: "center", gap: 3, justifyContent: "flex-end", fontSize: 10.5, color: T.green, fontWeight: 600 }}>
+                ACHIEVED <Ico name="check" size={10} strokeWidth={3} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -2217,7 +2311,7 @@ function GoalForm({ initial, onSave, onCancel, accounts }) {
       <h4 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px" }}>{initial ? "Edit Goal" : "Add Goal"}</h4>
       {/* Icon picker */}
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Icon</div>
+        <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 6, fontWeight: 500 }}>Icon</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {GOAL_ICONS.map((ic) => (
             <button key={ic} onClick={() => upd("icon", ic)} style={{
@@ -2276,7 +2370,7 @@ function GoalsTab({ goals, accounts, netWorth, onAdd, onSave, onDelete }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 3px" }}>Financial Goals</h3>
-          <p style={{ fontSize: 11.5, color: T.textDim, margin: 0 }}>
+          <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
             {totalGoals === 0 ? "Set targets and track your progress automatically." : `${achieved} of ${totalGoals} goal${totalGoals !== 1 ? "s" : ""} achieved`}
           </p>
         </div>
@@ -2330,7 +2424,7 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 3, marginBottom: 18, flexWrap: "wrap" }}>
+      <div className="c-tabs">
         <Tab label="Tax Year" active={activeTool === "tax-year"} onClick={() => setActiveTool("tax-year")} />
         <Tab label="FIRE Calculator" active={activeTool === "fire"} onClick={() => setActiveTool("fire")} />
         <Tab label="Carry-Forward" active={activeTool === "carry-forward"} onClick={() => setActiveTool("carry-forward")} />
@@ -2384,7 +2478,7 @@ function AICopilotTab() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>AI Financial Copilot</h3>
-            <p style={{ fontSize: 11.5, color: T.textDim, margin: 0 }}>
+            <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
               Powered by Claude. Analyses your current financial position and provides plain-English commentary.
             </p>
           </div>
@@ -2394,11 +2488,11 @@ function AICopilotTab() {
         </div>
 
         {error && (
-          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.red, lineHeight: 1.6 }}>
+          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.red, lineHeight: 1.6 }}>
             {error.includes("ANTHROPIC_API_KEY") ? (
               <>
                 <strong>API key not configured.</strong> Add your Anthropic API key to the Docker environment:
-                <pre style={{ marginTop: 8, padding: "8px 12px", background: T.surface, borderRadius: 4, fontSize: 11.5, color: T.textMuted, overflowX: "auto" }}>
+                <pre style={{ marginTop: 8, padding: "8px 12px", background: T.surface, borderRadius: 4, fontSize: 12, color: T.textMuted, overflowX: "auto" }}>
                   ANTHROPIC_API_KEY=sk-ant-...
                 </pre>
               </>
@@ -2417,7 +2511,7 @@ function AICopilotTab() {
         {commentary && !loading && (
           <div style={{
             background: T.bg, borderRadius: T.radius, padding: "16px 20px",
-            fontSize: 13.5, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
+            fontSize: 13, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
             borderLeft: `3px solid ${T.accent}`,
           }}>
             {commentary}
@@ -2428,12 +2522,12 @@ function AICopilotTab() {
           <div style={{ padding: "40px 20px", textAlign: "center", color: T.textDim, fontSize: 13 }}>
             Click <strong>Generate Analysis</strong> to get an AI-powered review of your financial position.
             <br /><br />
-            <span style={{ fontSize: 11 }}>Requires ANTHROPIC_API_KEY in your Docker environment. Your data stays on your server — only a summary is sent to the API.</span>
+            <span style={{ fontSize: 10.5 }}>Requires ANTHROPIC_API_KEY in your Docker environment. Your data stays on your server — only a summary is sent to the API.</span>
           </div>
         )}
       </div>
 
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.blue}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 11.5, color: T.textMuted, lineHeight: 1.6 }}>
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.blue}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12, color: T.textMuted, lineHeight: 1.6 }}>
         <strong style={{ color: T.blue }}>Privacy note:</strong> Only a numerical summary of your accounts is sent to the Claude API — no names, addresses, or identifying information. All data is processed on your server. The AI analysis is general commentary, not regulated financial advice.
       </div>
     </div>
@@ -2567,7 +2661,7 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div>
             <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>BoE Base Rate History</h3>
-            <p style={{ fontSize: 11, color: T.textDim, margin: 0 }}>
+            <p style={{ fontSize: 10.5, color: T.textDim, margin: 0 }}>
               {mortgage ? "Your tracker rate (BBR + margin) shown in blue" : "Official Bank Rate over time"}
             </p>
           </div>
@@ -2577,7 +2671,7 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
                 background: chartRange === r ? T.surfaceHover : "transparent",
                 color: chartRange === r ? T.accent : T.textDim,
                 border: `1px solid ${chartRange === r ? T.border : "transparent"}`,
-                borderRadius: 4, padding: "3px 10px", fontSize: 11, cursor: "pointer", fontWeight: 500,
+                borderRadius: 4, padding: "3px 10px", fontSize: 10.5, cursor: "pointer", fontWeight: 500,
               }}>{r.toUpperCase()}</button>
             ))}
           </div>
@@ -2591,15 +2685,15 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
                   <stop offset="100%" stopColor={T.accent} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => v.slice(0, 7)} interval={Math.max(1, Math.floor(chartData.length / 12))} />
-              <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={v => `${v}%`} domain={[0, "auto"]} />
+              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+              <XAxis dataKey="date" tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={v => v.slice(0, 7)} interval={Math.max(1, Math.floor(chartData.length / 12))} />
+              <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={v => `${v}%`} domain={[0, "auto"]} />
               <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()} formatter={v => `${v}%`} />
-              <Area type="stepAfter" dataKey="rate" name="Base Rate" stroke={T.accent} fill="url(#brGrad)" strokeWidth={2} />
+              <Area isAnimationActive={false} type="stepAfter" dataKey="rate" name="Base Rate" stroke={T.accent} fill="url(#brGrad)" strokeWidth={2} />
               {mortgage && (
-                <Area type="stepAfter" dataKey="tracker" name="Your Tracker" stroke={T.blue} fill="none" strokeWidth={2} strokeDasharray="6 3" />
+                <Area isAnimationActive={false} type="stepAfter" dataKey="tracker" name="Your Tracker" stroke={T.blue} fill="none" strokeWidth={2} strokeDasharray="6 3" />
               )}
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 10.5 }} />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
@@ -2622,7 +2716,7 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
               return (
                 <div key={c.date} style={{
                   padding: "6px 10px", background: T.bg, borderRadius: 4, border: `1px solid ${T.border}`,
-                  fontSize: 11, display: "flex", alignItems: "center", gap: 6,
+                  fontSize: 10.5, display: "flex", alignItems: "center", gap: 6,
                 }}>
                   <span style={{ color: T.textDim }}>{c.date.slice(0, 7)}</span>
                   <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{c.rate}%</span>
@@ -2653,18 +2747,18 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
       {scenarios && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Rate Change Scenarios</h3>
-          <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
+          <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px" }}>
             How your monthly payment changes if the base rate moves
           </p>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: `2px solid ${T.border}` }}>
-                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>BASE RATE</th>
-                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>YOUR RATE</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>MONTHLY</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>DIFFERENCE</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TOTAL INTEREST</th>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>BASE RATE</th>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>YOUR RATE</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>MONTHLY</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>DIFFERENCE</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>TOTAL INTEREST</th>
                 </tr>
               </thead>
               <tbody>
@@ -2697,18 +2791,18 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
       {scenarios?.overpayments && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 4px" }}>Overpayment Scenarios</h3>
-          <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 14px" }}>
+          <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 14px" }}>
             How much you save by overpaying each month at your current rate ({scenarios.current.rate}%)
           </p>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: `2px solid ${T.border}` }}>
-                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>EXTRA/MONTH</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>PAID OFF IN</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TOTAL INTEREST</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>INTEREST SAVED</th>
-                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 11, fontWeight: 600 }}>TIME SAVED</th>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>EXTRA/MONTH</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>PAID OFF IN</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>TOTAL INTEREST</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>INTEREST SAVED</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontSize: 10.5, fontWeight: 600 }}>TIME SAVED</th>
                 </tr>
               </thead>
               <tbody>
@@ -2736,7 +2830,7 @@ function RatesMortgageTab({ accounts, settings, onSaveSettings, addToast }) {
       )}
 
       {!mortgage && (
-        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "14px 18px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "14px 18px", fontSize: 13, color: T.textMuted, lineHeight: 1.6 }}>
           <strong style={{ color: T.amber }}>No mortgage found.</strong> Add a mortgage account in the Accounts tab to unlock rate change scenarios and overpayment modelling.
         </div>
       )}

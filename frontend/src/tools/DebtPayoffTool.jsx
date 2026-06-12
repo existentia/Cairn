@@ -39,7 +39,7 @@ export default function DebtPayoffTool({ accounts: allAccounts }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Debt Payoff Planner</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 16px" }}>
           Compare avalanche (highest rate first) vs snowball (smallest balance first) strategies. Excludes mortgage.
         </p>
 
@@ -82,12 +82,12 @@ export default function DebtPayoffTool({ accounts: allAccounts }) {
                     <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>{s.label}</div>
                     <div style={{ fontSize: 10.5, color: T.textDim }}>{s.sub}</div>
                   </div>
-                  {s.best && <span style={{ fontSize: 10, background: s.color + "22", color: s.color, padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>BEST</span>}
+                  {s.best && <span style={{ fontSize: 10.5, background: s.color + "22", color: s.color, padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>BEST</span>}
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color: s.color }}>
                   {Math.floor(s.months / 12)}y {s.months % 12}m
                 </div>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
+                <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 4 }}>
                   Total interest: {fmtFull(s.interest)}
                 </div>
               </div>
@@ -95,7 +95,7 @@ export default function DebtPayoffTool({ accounts: allAccounts }) {
           </div>
 
           {result.savings_vs_minimum.interest_saved > 0 && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.green}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.green}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.textMuted, lineHeight: 1.6 }}>
               Paying an extra {fmtFull(extraMonthly)}/month saves you <strong style={{ color: T.green }}>{fmtFull(result.savings_vs_minimum.interest_saved)}</strong> in interest and clears your debt <strong style={{ color: T.green }}>{result.savings_vs_minimum.months_saved} months</strong> sooner compared to minimum payments only.
             </div>
           )}

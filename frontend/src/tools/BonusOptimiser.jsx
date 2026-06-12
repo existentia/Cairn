@@ -41,7 +41,7 @@ export default function BonusOptimiser({ profile, settings }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Bonus Optimiser</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px" }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px" }}>
           Model a one-off lump sum (annual bonus, RSU vest, etc.) as cash vs salary sacrifice into pension.
           Uses {regionLabel} marginal rates.
         </p>
@@ -79,9 +79,9 @@ export default function BonusOptimiser({ profile, settings }) {
           {/* Two scenarios side by side */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 240px", padding: 16, background: T.surface, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Take all as cash</div>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Take all as cash</div>
               <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color: T.blue }}>{fmtFull(result.cash_route.take_home_increase)}</div>
-              <div style={{ fontSize: 11, color: T.textDim, marginTop: 2, marginBottom: 10 }}>Net to take-home</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2, marginBottom: 10 }}>Net to take-home</div>
               <div style={{ fontSize: 12, color: T.textMuted }}>Tax + NI: <strong style={{ color: T.red, fontFamily: T.mono }}>{fmtFull(result.cash_route.tax_ni_paid)}</strong></div>
               <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>Pension: <strong style={{ fontFamily: T.mono }}>£0</strong></div>
               <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
@@ -90,9 +90,9 @@ export default function BonusOptimiser({ profile, settings }) {
             </div>
 
             <div style={{ flex: "1 1 240px", padding: 16, background: T.surface, borderRadius: T.radius, border: `1px solid ${T.accent}66`, boxShadow: `inset 0 0 0 1px ${T.accent}22` }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T.accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sacrifice {sacrificePct}% to pension</div>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: T.accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sacrifice {sacrificePct}% to pension</div>
               <div style={{ fontSize: 22, fontWeight: 700, fontFamily: T.mono, color: T.green }}>{fmtFull(result.sacrifice_route.total_value)}</div>
-              <div style={{ fontSize: 11, color: T.textDim, marginTop: 2, marginBottom: 10 }}>Total value (take-home + pension)</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2, marginBottom: 10 }}>Total value (take-home + pension)</div>
               <div style={{ fontSize: 12, color: T.textMuted }}>Take-home: <strong style={{ color: T.text, fontFamily: T.mono }}>{fmtFull(result.sacrifice_route.take_home_increase)}</strong></div>
               <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>Pension: <strong style={{ color: T.accent, fontFamily: T.mono }}>{fmtFull(result.sacrifice_route.pension_increase)}</strong></div>
               <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>

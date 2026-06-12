@@ -45,7 +45,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Salary Sacrifice Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px" }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px" }}>
           Uses {regionLabel} income tax bands. Shows the true cost of increasing pension contributions via salary sacrifice.
         </p>
         <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
@@ -73,8 +73,8 @@ export default function SalarySacrificeTool({ profile, settings }) {
             <div style={{ display: "flex", justifyContent: "space-between", padding: "0 0 8px", marginBottom: 8, borderBottom: `2px solid ${T.border}` }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: T.textMuted }}>Annual Breakdown</span>
               <div style={{ display: "flex" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, width: 100, textAlign: "right" }}>CURRENT</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.accent, width: 100, textAlign: "right" }}>PROPOSED</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted, width: 100, textAlign: "right" }}>CURRENT</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: T.accent, width: 100, textAlign: "right" }}>PROPOSED</span>
               </div>
             </div>
             <StatRow label="Gross Salary" current={fmtFull(gross)} proposed={fmtFull(gross)} />
@@ -104,7 +104,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
           </div>
 
           {result.comparison.employer_ni_saving > 0 && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.textMuted, lineHeight: 1.6 }}>
               <strong style={{ color: T.amber }}>Employer NI saving:</strong> Your employer saves {fmtFull(result.comparison.employer_ni_saving)}/year in Employer NI. Ask if they'll share this — some employers pass part or all of it into your pension as an additional contribution.
             </div>
           )}

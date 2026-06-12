@@ -64,7 +64,7 @@ export default function FIRECalculator({ profile, accounts, settings, netWorth }
       {/* Inputs */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>FIRE Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px" }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 16px" }}>
           Financial Independence, Retire Early — find the portfolio size that funds your retirement indefinitely.
           Based on the safe withdrawal rate (SWR) concept: FIRE number = annual expenses ÷ SWR.
         </p>
@@ -72,7 +72,7 @@ export default function FIRECalculator({ profile, accounts, settings, netWorth }
           <Field label="Annual Expenses in Retirement" type="number" value={annualExpenses} onChange={setAnnualExpenses} prefix="£" />
           <Field label="Safe Withdrawal Rate" type="number" value={swr} onChange={setSwr} suffix="%" small />
           <div style={{ flex: "1 1 180px", display: "flex", alignItems: "flex-end", paddingBottom: 2 }}>
-            <span style={{ fontSize: 11, color: T.textDim, lineHeight: 1.5 }}>
+            <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
               4% is the classic Trinity Study rate. 3.5% is more conservative; 5% works for shorter retirements.
             </span>
           </div>
@@ -137,14 +137,14 @@ export default function FIRECalculator({ profile, accounts, settings, netWorth }
               border: `1px solid ${s.label === "Regular FIRE" ? T.accent + "44" : T.border}`,
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
-              <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>{s.swr}% SWR · {fmtFull(s.annualSpend)}/yr</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 8 }}>{s.swr}% SWR · {fmtFull(s.annualSpend)}/yr</div>
               <div style={{ fontSize: 20, fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{fmtFull(s.target)}</div>
               <ProgressBar value={s.progress} color={s.progress >= 100 ? T.green : T.accent} />
               <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 4 }}>{s.progress.toFixed(1)}% there</div>
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 12, fontSize: 11, color: T.textDim, lineHeight: 1.6 }}>
+        <div style={{ marginTop: 12, fontSize: 10.5, color: T.textDim, lineHeight: 1.6 }}>
           Monthly savings used in projection: <strong style={{ color: T.textMuted }}>{fmtFull(Math.round(monthlySavings))}/month</strong> ·
           Real growth rate: <strong style={{ color: T.textMuted }}>{(realGrowthRate * 100).toFixed(1)}%</strong> (after {settings.inflation_rate}% inflation)
         </div>

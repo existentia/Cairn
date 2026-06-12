@@ -33,7 +33,7 @@ export default function IhtEstimator({ netWorth, accounts }) {
 
   const Toggle = ({ value, onChange, label }) => (
     <div style={{ flex: "0 0 auto" }}>
-      <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+      <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
       <div style={{ display: "flex", gap: 4 }}>
         {[[true, "Yes"], [false, "No"]].map(([v, l]) => (
           <button key={String(v)} onClick={() => onChange(v)} style={{
@@ -51,7 +51,7 @@ export default function IhtEstimator({ netWorth, accounts }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Inheritance Tax Estimator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
           Estimates IHT due on your estate using 2025/26 allowances (frozen to 2030).
           Standard rate 40% above the Nil Rate Band; reduced rate 36% if 10%+ goes to charity.
         </p>
@@ -84,14 +84,14 @@ export default function IhtEstimator({ netWorth, accounts }) {
 
           {/* RNRB taper warning */}
           {result.allowances.rnrb_tapered_by > 0 && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.amber}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.textMuted, lineHeight: 1.6 }}>
               <strong style={{ color: T.amber }}>RNRB tapered:</strong> Estate over £2m means you lose £1 of Residence NRB for every £2 of estate. You've lost <strong style={{ color: T.red }}>{fmtFull(result.allowances.rnrb_tapered_by)}</strong> of the £{result.allowances.rnrb_full.toLocaleString()} potential RNRB. Bringing the estate below £2m (e.g. via lifetime gifts or pension contributions) would restore it.
             </div>
           )}
 
           {/* Reduced rate qualification */}
           {result.calculation.qualifies_reduced_rate && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.green}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12.5, color: T.textMuted, lineHeight: 1.6 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.green}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.textMuted, lineHeight: 1.6 }}>
               <strong style={{ color: T.green }}>Reduced rate applies:</strong> Leaving 10%+ of the chargeable estate to charity drops the IHT rate from 40% to 36% on the rest.
             </div>
           )}

@@ -60,7 +60,7 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
   return (
     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
       <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Drawdown Simulator</h3>
-      <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 16px" }}>
+      <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 16px" }}>
         Pot balance from retirement (age {profile.retirement_age}) · Today's money · {fmtFull(spAnnual)}/yr guaranteed income at 67 reduces pot withdrawals{dbAnnualPension > 0 ? ` (SP + DB pension)` : ""}
       </p>
 
@@ -68,7 +68,7 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
         <Field label="Monthly Spending in Retirement" type="number" value={monthlySpend}
           onChange={(v) => setMonthlySpend(Math.max(0, v))} prefix="£" />
         <div style={{ flex: "1 1 200px", paddingBottom: 2 }}>
-          <div style={{ fontSize: 11, color: T.textDim }}>
+          <div style={{ fontSize: 10.5, color: T.textDim }}>
             = {fmtFull(monthlySpend * 12)}/year · {fmtFull(Math.max(0, monthlySpend * 12 - spAnnual))}/year from pot after State Pension
           </div>
         </div>
@@ -83,19 +83,19 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
               <stop offset="100%" stopColor={T.purple} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-          <XAxis dataKey="age" tick={{ fontSize: 10, fill: T.textDim }} label={{ value: "Age", position: "insideBottomRight", offset: -4, fill: T.textDim, fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt} />
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+          <XAxis dataKey="age" tick={{ fontSize: 10.5, fill: T.textDim }} label={{ value: "Age", position: "insideBottomRight", offset: -4, fill: T.textDim, fontSize: 10.5 }} />
+          <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt} />
           <Tooltip contentStyle={ttStyle()} itemStyle={ttItemStyle()} labelStyle={ttLabelStyle()}
             formatter={(v) => fmtFull(v)} labelFormatter={(v) => `Age ${v}`} />
-          <Area type="monotone" dataKey="balance" name="Pot Balance" stroke={T.purple} fill="url(#ddG)" strokeWidth={2} dot={false} />
+          <Area isAnimationActive={false} type="monotone" dataKey="balance" name="Pot Balance" stroke={T.purple} fill="url(#ddG)" strokeWidth={2} dot={false} />
           {spStartsAt && (
             <ReferenceLine x={spStartsAt} stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5}
-              label={{ value: `SP age ${spStartsAt}`, fill: T.amber, fontSize: 10, position: "insideTopRight" }} />
+              label={{ value: `SP age ${spStartsAt}`, fill: T.amber, fontSize: 10.5, position: "insideTopRight" }} />
           )}
           {depletionAge && (
             <ReferenceLine x={depletionAge} stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5}
-              label={{ value: `Depletes ${depletionAge}`, fill: T.red, fontSize: 10, position: "insideTopLeft" }} />
+              label={{ value: `Depletes ${depletionAge}`, fill: T.red, fontSize: 10.5, position: "insideTopLeft" }} />
           )}
         </AreaChart>
       </ResponsiveContainer>
@@ -120,16 +120,16 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
 
       {/* Spending scenarios comparison */}
       <div>
-        <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Spending scenarios</div>
+        <div style={{ fontSize: 10.5, color: T.textDim, marginBottom: 8, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Spending scenarios</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {scenarios.map((s) => (
             <div key={s.label} style={{
               flex: "1 1 140px", padding: "10px 12px", background: T.bg, borderRadius: T.radius,
               border: `1px solid ${s.depletionAge ? T.red + "44" : T.green + "44"}`,
             }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: T.textMuted, marginBottom: 2 }}>{s.label}</div>
               <div style={{ fontSize: 13, fontFamily: T.mono, fontWeight: 600 }}>{fmtFull(s.monthly)}/mo</div>
-              <div style={{ fontSize: 11, color: s.depletionAge ? T.red : T.green, marginTop: 4 }}>
+              <div style={{ fontSize: 10.5, color: s.depletionAge ? T.red : T.green, marginTop: 4 }}>
                 {s.depletionAge ? `Depletes age ${s.depletionAge}` : `Pot survives to 100+`}
               </div>
               {!s.depletionAge && <div style={{ fontSize: 10.5, color: T.textDim }}>Remaining: {fmtFull(s.potAt100)}</div>}

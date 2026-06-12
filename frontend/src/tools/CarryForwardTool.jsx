@@ -11,7 +11,7 @@ function CFRow({ label, allowance, contributed, unused, highlight, currentContri
       <div style={{ fontSize: 12, fontFamily: T.mono, color: highlight ? T.accent : T.text, fontWeight: highlight ? 600 : 400 }}>{label}</div>
       <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(allowance)}</div>
       {highlight ? (
-        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10, color: T.textDim }}>(est.)</span></div>
+        <div style={{ fontSize: 12, fontFamily: T.mono, color: T.textMuted }}>{fmtFull(currentContrib)} <span style={{ fontSize: 10.5, color: T.textDim }}>(est.)</span></div>
       ) : (
         <div>
           <NumberInput
@@ -83,7 +83,7 @@ export default function CarryForwardTool({ profile, settings }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Pension Carry-Forward Calculator</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 16px", lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 16px", lineHeight: 1.6 }}>
           Unused pension annual allowance from the 3 prior tax years can be carried forward and added to this year's allowance.
           You must exhaust the current year's allowance (£{currentAllowance.toLocaleString()}) first, and must have been a member of a registered pension scheme in each carry-forward year.
         </p>
@@ -91,7 +91,7 @@ export default function CarryForwardTool({ profile, settings }) {
         {/* Header */}
         <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr", gap: 10, padding: "6px 0", borderBottom: `1px solid ${T.border}`, marginBottom: 4 }}>
           {["Tax Year", "Allowance", "Contributed", "Unused (CF)"].map((h) => (
-            <div key={h} style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</div>
+            <div key={h} style={{ fontSize: 10.5, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</div>
           ))}
         </div>
 

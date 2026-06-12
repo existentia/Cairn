@@ -95,7 +95,7 @@ export default function MarginalRateCurve({ profile, settings }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Marginal Rate Curve</h3>
-        <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
           What the <em>next £1</em> of salary actually costs in income tax + employee NI{effectiveCb > 0 ? " + Child Benefit clawback" : ""}.
           The spike between £100k–£125k is the Personal Allowance taper{effectiveCb > 0 ? "; the £60k–£80k bump is HICBC" : ""}.
           Salary sacrifice works by sliding you left along this curve.
@@ -133,25 +133,25 @@ export default function MarginalRateCurve({ profile, settings }) {
                 <stop offset="100%" stopColor={T.accent} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-            <XAxis dataKey="salary" tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={fmt}
+            <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={T.border} />
+            <XAxis dataKey="salary" tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={fmt}
               type="number" domain={[0, 200000]} tickCount={9} />
-            <YAxis tick={{ fontSize: 10, fill: T.textDim }} tickFormatter={(v) => `${v}%`} domain={[0, "auto"]} />
+            <YAxis tick={{ fontSize: 10.5, fill: T.textDim }} tickFormatter={(v) => `${v}%`} domain={[0, "auto"]} />
             <Tooltip
               contentStyle={ttStyle()} labelStyle={ttLabelStyle()}
               itemStyle={{ color: T.accent, fontSize: 12, padding: "2px 0" }}
               formatter={(v) => [`${v}%`, "Marginal rate"]}
               labelFormatter={(v) => `Salary ${fmtFull(v)}`}
             />
-            <Area type="stepAfter" dataKey="marginal" name="Marginal rate"
+            <Area isAnimationActive={false} type="stepAfter" dataKey="marginal" name="Marginal rate"
               stroke={T.accent} fill="url(#mrG)" strokeWidth={2} dot={false} />
             {currentSalary > 0 && currentSalary <= 200000 && (
               <ReferenceLine x={currentSalary} stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5}
-                label={{ value: `Salary ${fmt(currentSalary)}`, fill: T.red, fontSize: 10, position: "insideTopRight" }} />
+                label={{ value: `Salary ${fmt(currentSalary)}`, fill: T.red, fontSize: 10.5, position: "insideTopRight" }} />
             )}
             {afterSacrifice > 0 && Math.abs(afterSacrifice - currentSalary) > 500 && afterSacrifice <= 200000 && (
               <ReferenceLine x={afterSacrifice} stroke={T.green} strokeDasharray="4 3" strokeWidth={1.5}
-                label={{ value: `After sacrifice ${fmt(Math.round(afterSacrifice))}`, fill: T.green, fontSize: 10, position: "insideTopLeft" }} />
+                label={{ value: `After sacrifice ${fmt(Math.round(afterSacrifice))}`, fill: T.green, fontSize: 10.5, position: "insideTopLeft" }} />
             )}
           </AreaChart>
         </ResponsiveContainer>

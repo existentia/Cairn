@@ -59,10 +59,10 @@ function AllowanceCard({ title, used, allowance, color, sub, cta }) {
         </div>
       </div>
       <ProgressBar pct={pct} color={color} />
-      <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono, marginBottom: 8 }}>
+      <div style={{ fontSize: 10.5, color: T.textMuted, fontFamily: T.mono, marginBottom: 8 }}>
         {remaining > 0 ? `${fmtFull(remaining)} remaining` : "Allowance maxed"}
       </div>
-      <div style={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>{sub}</div>
+      <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>{sub}</div>
       {cta && <div style={{ marginTop: 10 }}>{cta}</div>}
     </CardShell>
   );
@@ -84,7 +84,7 @@ function ExposureCard({ title, lost, total, color, sub, cta }) {
         </div>
       </div>
       <ProgressBar pct={pct} color={color} />
-      <div style={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>{sub}</div>
+      <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>{sub}</div>
       {cta && <div style={{ marginTop: 10 }}>{cta}</div>}
     </CardShell>
   );
@@ -222,20 +222,20 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
         <div>
           <div style={{ fontSize: 10.5, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Tax Year</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.mono }}>{taxYear}</div>
-          <div style={{ fontSize: 11.5, color: T.textDim, marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: T.textDim, marginTop: 2 }}>
             {region === "scotland" ? "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland" : "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England / Wales / NI"}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 10.5, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Days to 5 April</div>
           <div style={{ fontSize: 26, fontWeight: 700, color: days <= 60 ? T.amber : T.accent, fontFamily: T.mono }}>{days}</div>
-          <div style={{ fontSize: 11.5, color: T.textDim, marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: T.textDim, marginTop: 2 }}>
             ~{monthsLeft} month{monthsLeft !== 1 ? "s" : ""} left
           </div>
         </div>
       </div>
 
-      <p style={{ fontSize: 11.5, color: T.textDim, margin: "0 2px", lineHeight: 1.6 }}>
+      <p style={{ fontSize: 12, color: T.textDim, margin: "0 2px", lineHeight: 1.6 }}>
         Snapshot of your annual UK tax allowances. Most are <em>use-it-or-lose-it</em> and reset on 6 April —
         only the Pension Annual Allowance allows carry-forward from the prior 3 tax years.
       </p>
@@ -297,7 +297,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
               {carryForwardAvailable === 0 && <> Prior-year unused allowance can be carried forward — open the Carry-Forward tool to record it.</>}
             </>
           }
-          cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("carry-forward")} style={{ fontSize: 11 }}>Carry-Forward tool →</Btn>}
+          cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("carry-forward")} style={{ fontSize: 10.5 }}>Carry-Forward tool →</Btn>}
         />
 
         {/* ─ CGT exempt amount ─ */}
@@ -312,7 +312,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
             </div>
             <ProgressBar pct={(cgtRealised / CGT_ANNUAL_ALLOWANCE) * 100} color={T.amber} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>Realised gains so far:</span>
+              <span style={{ fontSize: 10.5, color: T.textMuted, whiteSpace: "nowrap" }}>Realised gains so far:</span>
               <div style={{ flex: "0 0 120px" }}>
                 <NumberInput
                   value={cgtRealised}
@@ -325,7 +325,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
                 />
               </div>
             </div>
-            <div style={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.6, flex: 1 }}>
               {unrealisedGain > 0 ? (
                 <>GIA holdings show <strong>{fmtFull(unrealisedGain)}</strong> of unrealised gain.
                 Bed-and-ISA up to {fmtFull(Math.min(unrealisedGain, cgtRemaining))} this year to use the allowance tax-free.
@@ -353,7 +353,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
               creating a ~60% effective marginal rate in this band.
               A pension sacrifice of {fmtFull(paRestoreSacrifice)} would drag taxable income to £100k and fully restore the allowance.
             </>}
-            cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("salary-sacrifice")} style={{ fontSize: 11 }}>Salary Sacrifice tool →</Btn>}
+            cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("salary-sacrifice")} style={{ fontSize: 10.5 }}>Salary Sacrifice tool →</Btn>}
           />
         )}
 
@@ -370,7 +370,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
                 ? <> A pension sacrifice of {fmtFull(hicbcSacrificeToZero)} would drop adjusted net income below £{HICBC_THRESHOLD_START.toLocaleString()} and restore the full benefit.</>
                 : <> Fully clawed back above £{HICBC_THRESHOLD_END.toLocaleString()} — sacrifice down to £{HICBC_THRESHOLD_START.toLocaleString()} to recover.</>}
             </>}
-            cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("salary-sacrifice")} style={{ fontSize: 11 }}>Salary Sacrifice tool →</Btn>}
+            cta={onNavigate && <Btn variant="secondary" onClick={() => onNavigate("salary-sacrifice")} style={{ fontSize: 10.5 }}>Salary Sacrifice tool →</Btn>}
           />
         )}
 
