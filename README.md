@@ -304,4 +304,4 @@ anything important against HMRC guidance and consult an FCA-regulated adviser be
 
 ## Licence
 
-[MIT](LICENSE) © 2026 Neil
+[MIT](LICENSE) © 2026 Neil Johnson
