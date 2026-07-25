@@ -14,7 +14,28 @@ LAN in one Docker container — SQLite on a local volume, no third-party service
 no accounts. The only outbound calls are an optional Claude API request for AI commentary
 (numbers only, never account names) and a Bank of England base-rate lookup.
 
-**Contents:** [Features](#features) · [Quick Start](#quick-start-docker) · [Architecture](#architecture) · [API](#api-endpoints) · [Backup](#backup--restore) · [Development](#development) · [Security](#security-notes)
+**Contents:** [Screenshots](#screenshots) · [Features](#features) · [Quick Start](#quick-start-docker) · [Architecture](#architecture) · [API](#api-endpoints) · [Backup](#backup--restore) · [Development](#development) · [Security](#security-notes)
+
+## Screenshots
+
+> Every figure below is fictional demo data — a made-up persona on a £72k Scottish salary.
+
+![Overview — hero net worth, asset mix and history](docs/screenshots/01-overview.png)
+
+| | |
+|:--|:--|
+| [![Advisor](docs/screenshots/03-advisor.png)](docs/screenshots/03-advisor.png) | [![Tax Year](docs/screenshots/06-tax-year.png)](docs/screenshots/06-tax-year.png) |
+| **Advisor** — rule-based insights, filterable by severity and topic | **Tax Year** — ISA, LISA and pension allowances at a glance |
+| [![Projections](docs/screenshots/04-projections.png)](docs/screenshots/04-projections.png) | [![Marginal Rate Curve](docs/screenshots/07-marginal-rate.png)](docs/screenshots/07-marginal-rate.png) |
+| **Projections** — ±1σ forecast envelope and retirement readiness | **Marginal Rate** — the 60% PA-taper zone and HICBC ramp, made visible |
+| [![Accounts](docs/screenshots/02-accounts.png)](docs/screenshots/02-accounts.png) | [![FIRE Calculator](docs/screenshots/08-fire-calculator.png)](docs/screenshots/08-fire-calculator.png) |
+| **Accounts** — every wrapper type, with contribution and return tracking | **FIRE** — Lean/Regular/Fat targets plus Coast FIRE |
+| [![Salary Sacrifice](docs/screenshots/09-salary-sacrifice.png)](docs/screenshots/09-salary-sacrifice.png) | [![Goals](docs/screenshots/05-goals.png)](docs/screenshots/05-goals.png) |
+| **Salary Sacrifice** — Scottish and rUK bands, NI saving, real cost | **Goals** — auto-tracked against net worth or an account type |
+
+Light theme is a click away:
+
+![Light theme](docs/screenshots/10-overview-light.png)
 
 ## Features
 
