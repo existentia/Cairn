@@ -145,13 +145,21 @@ export default function MarginalRateCurve({ profile, settings }) {
             />
             <Area isAnimationActive={false} type="stepAfter" dataKey="marginal" name="Marginal rate"
               stroke={T.accent} fill="url(#mrG)" strokeWidth={2} dot={false} />
+            {/* The two markers sit close together whenever the sacrifice is
+                modest, so anchor each label on the side facing away from the
+                other line and stagger them vertically — otherwise the text
+                runs together (sacrifice is always the lower salary, except
+                near the right edge where we flip the current-salary label
+                back inwards to stay on canvas). */}
             {currentSalary > 0 && currentSalary <= 200000 && (
               <ReferenceLine x={currentSalary} stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5}
-                label={{ value: `Salary ${fmt(currentSalary)}`, fill: T.red, fontSize: 10.5, position: "insideTopRight" }} />
+                label={{ value: `Salary ${fmt(currentSalary)}`, fill: T.red, fontSize: 10.5,
+                         position: currentSalary > 170000 ? "insideTopRight" : "insideTopLeft", offset: 6 }} />
             )}
             {afterSacrifice > 0 && Math.abs(afterSacrifice - currentSalary) > 500 && afterSacrifice <= 200000 && (
               <ReferenceLine x={afterSacrifice} stroke={T.green} strokeDasharray="4 3" strokeWidth={1.5}
-                label={{ value: `After sacrifice ${fmt(Math.round(afterSacrifice))}`, fill: T.green, fontSize: 10.5, position: "insideTopLeft" }} />
+                label={{ value: `After sacrifice ${fmt(Math.round(afterSacrifice))}`, fill: T.green, fontSize: 10.5,
+                         position: "insideTopRight", offset: 22 }} />
             )}
           </AreaChart>
         </ResponsiveContainer>
