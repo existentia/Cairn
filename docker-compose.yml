@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   cairn:
     build: .
@@ -13,6 +11,8 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - BACKUP_DIR=${BACKUP_DIR:-/app/data/backups}
+      - BACKUP_RETAIN_DAYS=${BACKUP_RETAIN_DAYS:-14}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

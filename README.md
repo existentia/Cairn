@@ -4,6 +4,18 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 
 *One stone at a time.*
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/existentia/Cairn)](https://github.com/existentia/Cairn/releases)
+[![Stack](https://img.shields.io/badge/stack-Flask%20%2B%20React%20%2B%20SQLite-informational)](#architecture)
+[![Docker](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED)](#quick-start-docker)
+
+Your data never leaves your machine. Cairn is a single-user app designed to run on your home
+LAN in one Docker container — SQLite on a local volume, no third-party services, no telemetry,
+no accounts. The only outbound calls are an optional Claude API request for AI commentary
+(numbers only, never account names) and a Bank of England base-rate lookup.
+
+**Contents:** [Features](#features) · [Quick Start](#quick-start-docker) · [Architecture](#architecture) · [API](#api-endpoints) · [Backup](#backup--restore) · [Development](#development) · [Security](#security-notes)
+
 ## Features
 
 ### Net Worth Tracking
@@ -37,7 +49,8 @@ A private, self-hosted financial dashboard for tracking net worth, modelling ret
 - Three scenarios: Lean FIRE (5% SWR, 70% expenses), Regular FIRE (4%), Fat FIRE (3.5%, 130% expenses)
 
 ### Financial Advisor
-Rule-based insights engine (23 rules) covering:
+Rule-based insights engine — a pure function over your accounts, profile and snapshots, so every
+recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
 - ISA allowance usage and days remaining in the tax year
 - **LISA bonus headroom** — flags missed 25% government bonus when under 50
 - **CGT allowance** — bed-and-ISA prompt when GIA unrealised gains exceed £3k
@@ -104,7 +117,7 @@ Rule-based insights engine (23 rules) covering:
 ### 1. Clone and configure
 
 ```bash
-git clone <your-repo-url> cairn
+git clone https://github.com/existentia/Cairn.git cairn
 cd cairn
 cp .env.example .env
 ```
@@ -126,13 +139,24 @@ Changing `ADMIN_PASSWORD` and restarting the container invalidates all existing 
 docker compose up -d --build
 ```
 
-Available at `http://<your-server-ip>:8070`
+Available at `http://<your-server-ip>:8070`. Log in with the `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+you set above, then add your accounts and take a first snapshot.
 
 ### 3. Deploy via Portainer
 
-1. **Stacks** → **Add Stack** → **Repository** (point to your repo)
+1. **Stacks** → **Add Stack** → **Repository** (point to your fork or this repo)
 2. Add environment variables: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, optionally `ANTHROPIC_API_KEY`
 3. **Deploy the stack**
+
+### Configuration reference
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `ADMIN_USERNAME` | yes | `admin` | Single-user login name |
+| `ADMIN_PASSWORD` | yes | `changeme` | Login password; hashed at rest. Changing it invalidates all sessions |
+| `ANTHROPIC_API_KEY` | no | *(unset)* | Enables the AI Copilot tab; returns 503 when unset |
+| `BACKUP_DIR` | no | `/app/data/backups` | Where the daily backup cron writes SQLite copies |
+| `BACKUP_RETAIN_DAYS` | no | `14` | How many daily backups to keep before rotating |
 
 ---
 
@@ -157,7 +181,7 @@ cairn/
 │   ├── src/
 │   │   ├── App.jsx         # Main dashboard UI + tab routing
 │   │   ├── api.js          # API client
-│   │   ├── advisor.js      # Financial insights engine (16 rules)
+│   │   ├── advisor.js      # Financial insights engine (pure function)
 │   │   ├── constants.js    # UK tax constants mirror (frontend twin of uk_tax.py)
 │   │   ├── ui.jsx          # Shared design tokens (theme), formatters, primitives
 │   │   ├── tools/          # Self-contained calculator components
@@ -165,6 +189,10 @@ cairn/
 │   │   │   ├── DrawdownSimulator.jsx
 │   │   │   ├── CarryForwardTool.jsx
 │   │   │   ├── SalarySacrificeTool.jsx
+│   │   │   ├── BonusOptimiser.jsx
+│   │   │   ├── MarginalRateCurve.jsx
+│   │   │   ├── IhtEstimator.jsx
+│   │   │   ├── TaxYearDashboard.jsx
 │   │   │   └── DebtPayoffTool.jsx
 │   │   └── main.jsx
 │   ├── index.html
@@ -191,36 +219,66 @@ Database upgrades are handled by a named-migration framework in `backend/migrati
 | PUT/DELETE | `/api/accounts/:id` | Update / delete account |
 | GET/POST | `/api/snapshots` | History / take snapshot |
 | PUT/DELETE | `/api/snapshots/:id` | Edit / delete a snapshot |
+| POST | `/api/snapshots/import-csv` | Bulk-import historic net worth from CSV |
 | GET/PUT | `/api/settings` | Projection & tax assumptions |
 | GET/POST | `/api/goals` | List / create goals |
 | PUT/DELETE | `/api/goals/:id` | Update / delete a goal |
 | POST | `/api/ai/commentary` | AI-powered financial analysis |
 | POST | `/api/tools/salary-sacrifice` | Scottish / rUK salary sacrifice calculator |
+| POST | `/api/tools/bonus-optimiser` | Lump sum: cash vs sacrifice-to-pension |
 | POST | `/api/tools/debt-payoff` | Avalanche vs snowball debt comparison |
 | POST | `/api/tools/mortgage-scenarios` | Mortgage scenario modelling |
+| POST | `/api/tools/iht-estimator` | Inheritance tax estimate (NRB + RNRB) |
 | GET | `/api/rates/boe-base-rate` | Bank of England base rate |
 | GET | `/api/export` | Full data export (JSON) |
 | POST | `/api/import` | Data import (JSON) |
 
+All `/api/*` routes except `/api/auth/login` require an `Authorization: Bearer <token>` header.
+
 ---
 
-## Backup
+## Backup & restore
+
+A cron job inside the container writes a rotated SQLite backup daily (see `BACKUP_DIR` /
+`BACKUP_RETAIN_DAYS` above). For an ad-hoc copy:
 
 ```bash
 docker cp cairn:/app/data/cairn.db ./backups/cairn-$(date +%Y%m%d).db
 ```
+
+For a portable, human-readable backup, use **Data → Export** in the UI (JSON). Importing that
+file writes a pre-import database backup first and rolls back atomically if anything fails.
 
 ---
 
 ## Development
 
 ```bash
-# Backend
+# Backend (Flask, port 8000)
 cd backend && pip install -r requirements.txt && FLASK_DEBUG=1 python app.py
 
-# Frontend (port 3000, proxies API to 8000)
+# Frontend (Vite dev server, port 3000 — proxies /api → :8000)
 cd frontend && npm install && npm run dev
+
+# Production build of the SPA (output: frontend/dist/, served by Flask as static)
+cd frontend && npm run build
 ```
+
+There is no test suite, linter, or type checker configured — this is a personal project kept
+deliberately dependency-light. Schema changes go through the named-migration framework in
+`backend/migrations.py`; append a new `(name, callable)` entry to `MIGRATIONS` rather than
+editing existing ones. `CLAUDE.md` documents the architecture in more depth, including the
+mirrored UK-tax constants in `backend/uk_tax.py` / `frontend/src/constants.js` that must be
+updated together.
+
+---
+
+## Contributing
+
+This is a personal project built around one person's finances, so the roadmap is idiosyncratic
+and I may not merge everything. That said, issues and PRs are welcome — especially bug reports,
+UK tax-year updates, and corrections to the tax logic. Fork it freely if you want to take it in
+your own direction.
 
 ---
 
@@ -233,6 +291,17 @@ cd frontend && npm install && npm run dev
 - If exposing externally, use a reverse proxy with HTTPS and consider Authelia/Authentik
 - AI Copilot sends only numerical summaries to the Claude API — no personal identifiers
 
+See [SECURITY.md](SECURITY.md) for the full threat model and how to report a vulnerability
+privately.
+
 ## Disclaimer
 
-General financial information only — not regulated advice. Projections use simplified models. Consult an FCA-regulated adviser for personalised recommendations.
+General financial information only — **not regulated advice**. Cairn is not authorised by the
+FCA and nothing it produces is a personal recommendation. Tax rules are hand-coded for the
+2025/26 UK tax year and may be incomplete, out of date, or simply wrong; projections use
+simplified models that ignore sequence-of-returns risk, fees, and most edge cases. Check
+anything important against HMRC guidance and consult an FCA-regulated adviser before acting.
+
+## Licence
+
+[MIT](LICENSE) © 2026 Neil
