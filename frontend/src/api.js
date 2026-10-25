@@ -93,8 +93,9 @@ export const api = {
   exportData: () => apiFetch("/export"),
   importData: (data) => apiFetch("/import", { method: "POST", body: JSON.stringify(data) }),
 
-  // AI Commentary
-  getCommentary: () => apiFetch("/ai/commentary", { method: "POST" }),
+  // AI Insights — GET returns the cached analysis, POST generates a fresh one
+  getCachedCommentary: () => apiFetch("/ai/commentary"),
+  generateCommentary: () => apiFetch("/ai/commentary", { method: "POST" }),
 
   // Tools
   salarySacrifice: (data) => apiFetch("/tools/salary-sacrifice", { method: "POST", body: JSON.stringify(data) }),

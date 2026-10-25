@@ -85,6 +85,21 @@ def _m_roll_tax_year_2026_27(db):
     db.execute("UPDATE profile SET state_pension_annual = 12548 WHERE state_pension_annual = 11500")
 
 
+def _m_create_ai_commentary(db):
+    """Single-row cache for the last AI Insights analysis, so opening the tab
+    doesn't call (and pay for) the Claude API every time. input_hash lets the
+    UI say when the underlying figures have changed since it was generated."""
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS ai_commentary ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " commentary TEXT NOT NULL,"
+        " model TEXT NOT NULL DEFAULT '',"
+        " input_hash TEXT NOT NULL DEFAULT '',"
+        " generated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+        ")"
+    )
+
+
 # Migrations are applied in list order. Names are permanent — they are
 # the key in `schema_migrations`. Don't rename or remove past entries.
 MIGRATIONS = [
@@ -115,6 +130,7 @@ MIGRATIONS = [
      _alter_add_column("profile", "spouse_income REAL NOT NULL DEFAULT 0")),
     ("014_backfill_investments_category", _m_backfill_investments_category),
     ("015_roll_tax_year_2026_27", _m_roll_tax_year_2026_27),
+    ("016_create_ai_commentary", _m_create_ai_commentary),
 ]
 
 

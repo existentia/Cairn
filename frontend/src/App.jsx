@@ -2452,44 +2452,72 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function AIInsightsTab() {
-  const [commentary, setCommentary] = useState("");
+  // { commentary, generated_at, model, data_changed } — the last analysis,
+  // cached server-side so opening the tab doesn't call the Claude API.
+  const [cached, setCached] = useState(null);
+  const [checking, setChecking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const commentary = cached?.commentary || "";
 
-  const fetchCommentary = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    api.getCachedCommentary()
+      .then((res) => { if (!cancelled && res && !res.error) setCached(res); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const generate = async () => {
     setLoading(true);
     setError("");
-    setCommentary("");
     try {
-      const res = await api.getCommentary();
+      const res = await api.generateCommentary();
       if (res.error) {
+        // Keep showing the previous analysis; just report the failure.
         setError(res.error + (res.detail ? ` — ${res.detail}` : ""));
       } else {
-        setCommentary(res.commentary);
+        setCached(res);
       }
     } catch (e) {
-      setError(e.message || "Failed to fetch commentary");
+      setError(e.message || "Failed to generate analysis");
     }
     setLoading(false);
   };
 
+  // SQLite datetime('now') is UTC without a zone marker.
+  const generatedAt = cached?.generated_at
+    ? new Date(cached.generated_at.replace(" ", "T") + "Z").toLocaleString("en-GB", {
+        day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+      })
+    : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>AI Insights</h3>
             <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
               Powered by Claude. Analyses your current financial position and provides plain-English commentary.
             </p>
           </div>
-          <Btn onClick={fetchCommentary} style={{ flexShrink: 0 }}>
-            {loading ? "Analysing..." : commentary ? "Refresh Analysis" : "Generate Analysis"}
-          </Btn>
+          {!checking && (
+            commentary ? (
+              <Btn variant="secondary" onClick={generate} disabled={loading} style={{ flexShrink: 0 }}>
+                {loading ? "Refreshing..." : "Refresh Analysis"}
+              </Btn>
+            ) : (
+              <Btn onClick={generate} disabled={loading} style={{ flexShrink: 0 }}>
+                {loading ? "Analysing..." : "Generate Analysis"}
+              </Btn>
+            )
+          )}
         </div>
 
         {error && (
-          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.red, lineHeight: 1.6 }}>
+          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.red, lineHeight: 1.6, marginBottom: commentary ? 12 : 0 }}>
             {error.includes("ANTHROPIC_API_KEY") ? (
               <>
                 <strong>API key not configured.</strong> Add your Anthropic API key to the Docker environment:
@@ -2510,16 +2538,24 @@ function AIInsightsTab() {
         )}
 
         {commentary && !loading && (
-          <div style={{
-            background: T.bg, borderRadius: T.radius, padding: "16px 20px",
-            fontSize: 13, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
-            borderLeft: `3px solid ${T.accent}`,
-          }}>
-            {commentary}
-          </div>
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", alignItems: "center", fontSize: 11, color: T.textDim, marginBottom: 8 }}>
+              {generatedAt && <span>Generated {generatedAt}</span>}
+              {cached?.data_changed && (
+                <span style={{ color: T.amber }}>Your figures have changed since this was generated — refresh to update it.</span>
+              )}
+            </div>
+            <div style={{
+              background: T.bg, borderRadius: T.radius, padding: "16px 20px",
+              fontSize: 13, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
+              borderLeft: `3px solid ${T.accent}`,
+            }}>
+              {commentary}
+            </div>
+          </>
         )}
 
-        {!commentary && !loading && !error && (
+        {!checking && !commentary && !loading && !error && (
           <div style={{ padding: "40px 20px", textAlign: "center", color: T.textDim, fontSize: 13 }}>
             Click <strong>Generate Analysis</strong> to get an AI-powered review of your financial position.
             <br /><br />
