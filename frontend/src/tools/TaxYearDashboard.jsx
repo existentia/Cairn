@@ -12,7 +12,7 @@ import {
   CB_WEEKLY_FIRST_CHILD, CB_WEEKLY_ADDITIONAL_CHILD,
   MARRIAGE_ALLOWANCE_TRANSFER, MARRIAGE_ALLOWANCE_SAVING,
   MARRIAGE_ALLOWANCE_SPOUSE_MAX,
-  getPriorTaxYears, daysUntilTaxYearEnd,
+  getPriorTaxYears, daysUntilTaxYearEnd, TAX_YEAR_LABEL,
 } from "../constants.js";
 
 // ── Card primitives ──────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ function InfoCard({ title, color, body, cta }) {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function TaxYearDashboard({ profile, accounts, settings, onNavigate }) {
-  const taxYear = settings.tax_year || "2025/26";
+  const taxYear = settings.tax_year || TAX_YEAR_LABEL;
   const region = settings.tax_region || "scotland";
   const age = ageFromDob(profile.dob);
   const days = daysUntilTaxYearEnd();

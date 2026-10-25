@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { T, NumberInput } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
-import { getPriorTaxYears, PENSION_ANNUAL_ALLOWANCE } from "../constants.js";
+import { getPriorTaxYears, PENSION_ANNUAL_ALLOWANCE, TAX_YEAR_LABEL } from "../constants.js";
 
 // Top-level so React keeps its identity stable across parent re-renders —
 // otherwise the input remounts on every keystroke and loses focus.
@@ -30,7 +30,7 @@ function CFRow({ label, allowance, contributed, unused, highlight, currentContri
 }
 
 export default function CarryForwardTool({ profile, settings }) {
-  const currentTaxYear = settings.tax_year || "2025/26";
+  const currentTaxYear = settings.tax_year || TAX_YEAR_LABEL;
   const priorYears = useMemo(() => getPriorTaxYears(currentTaxYear, 3), [currentTaxYear]);
   const currentAllowance = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
   const currentContrib = Math.round(

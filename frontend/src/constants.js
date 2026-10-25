@@ -1,4 +1,4 @@
-// UK tax constants and helpers for 2025/26.
+// UK tax constants and helpers for 2026/27.
 // Mirror of backend/uk_tax.py — keep in sync when the tax year rolls over.
 
 export const ASSET_TYPES = new Set([
@@ -16,7 +16,10 @@ export const INVESTMENT_PENSION_TYPES = new Set(["PENSION_DC", "SIPP"]);
 export const ISA_TYPES = new Set(["ISA_SS", "ISA_CASH", "ISA_LISA"]);
 export const CASH_TYPES = new Set(["CURRENT", "SAVINGS"]);
 
-// Income tax 2025/26
+// Tax year the constants below describe (mirror of TAX_YEAR_LABEL in uk_tax.py).
+export const TAX_YEAR_LABEL = "2026/27";
+
+// Income tax 2026/27
 export const PERSONAL_ALLOWANCE = 12570;
 export const PERSONAL_ALLOWANCE_TAPER_START = 100000;
 export const PERSONAL_ALLOWANCE_TAPER_END = 125140;
@@ -25,7 +28,7 @@ export const RUK_HIGHER_RATE_THRESHOLD = 50270;
 export const SCOTLAND_HIGHER_RATE_PCT = 42;
 export const RUK_HIGHER_RATE_PCT = 40;
 
-// National Insurance (Class 1, 2025/26)
+// National Insurance (Class 1, 2026/27)
 export const NI_PRIMARY_THRESHOLD = 12570;
 export const NI_UPPER_EARNINGS_LIMIT = 50270;
 export const NI_RATE_MAIN = 0.08;
@@ -34,8 +37,8 @@ export const NI_RATE_UEL_PLUS = 0.02;
 // Income tax bands as [upper_bound, rate] — upper bounds are absolute gross
 // income assuming the full personal allowance (mirror of uk_tax.py).
 export const SCOTLAND_BANDS = [
-  [14876, 0.19],     // Starter
-  [26561, 0.20],     // Basic
+  [16537, 0.19],     // Starter  (2026/27: starter/basic thresholds up 7.4%)
+  [29526, 0.20],     // Basic
   [43662, 0.21],     // Intermediate
   [75000, 0.42],     // Higher
   [125140, 0.45],    // Advanced
@@ -72,9 +75,9 @@ export const CGT_HIGHER_RATE_PCT = 24;
 //   - Fully tapered at £80k
 export const HICBC_THRESHOLD_START = 60000;
 export const HICBC_THRESHOLD_END = 80000;
-// Child Benefit weekly rates (2025/26)
-export const CB_WEEKLY_FIRST_CHILD = 26.05;
-export const CB_WEEKLY_ADDITIONAL_CHILD = 17.25;
+// Child Benefit weekly rates (2026/27)
+export const CB_WEEKLY_FIRST_CHILD = 27.05;
+export const CB_WEEKLY_ADDITIONAL_CHILD = 17.90;
 
 // Marriage Allowance
 //   - Non-taxpayer spouse transfers £1,260 of personal allowance to basic-rate partner
@@ -84,7 +87,7 @@ export const MARRIAGE_ALLOWANCE_TRANSFER = 1260;
 export const MARRIAGE_ALLOWANCE_SAVING = 252;
 export const MARRIAGE_ALLOWANCE_SPOUSE_MAX = 11310;
 
-// Inheritance Tax (frozen to 2030)
+// Inheritance Tax (NRB and RNRB frozen to April 2031)
 //   - 40% on estate value over the Nil Rate Band (NRB)
 //   - Residence NRB (RNRB) is an extra slice when main residence passes to
 //     direct descendants. Tapered by £1 per £2 over £2M, nil at £2.35M.
@@ -110,12 +113,13 @@ export const PENSION_AA_HISTORY = {
   "2014/15": 40000, "2015/16": 40000, "2016/17": 40000, "2017/18": 40000,
   "2018/19": 40000, "2019/20": 40000, "2020/21": 40000, "2021/22": 40000,
   "2022/23": 40000, "2023/24": 60000, "2024/25": 60000, "2025/26": 60000,
+  "2026/27": 60000,
 };
 
 // Ages
 export const PENSION_ACCESS_AGE = 57; // From April 2028
 export const STATE_PENSION_AGE = 67;
-export const STATE_PENSION_ANNUAL_DEFAULT = 11500;
+export const STATE_PENSION_ANNUAL_DEFAULT = 12548; // Full new State Pension 2026/27: £241.30/week
 
 // Tax-year helpers
 const TAX_YEAR_RE = /^(\d{4})\/(\d{2})$/;

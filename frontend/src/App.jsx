@@ -11,6 +11,7 @@ import {
   PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
   ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT, LISA_CONTRIB_MAX_AGE,
+  STATE_PENSION_ANNUAL_DEFAULT, TAX_YEAR_LABEL,
 } from "./constants.js";
 
 import {
@@ -1285,7 +1286,7 @@ export default function App() {
                   { label: "Projected pot at retirement", value: fmtFull(retirementPot), color: T.accent, sub: retirementPotLow && retirementPotHigh ? `±1σ: ${fmtFull(retirementPotLow)} – ${fmtFull(retirementPotHigh)}` : null },
                   { label: "4% drawdown (annual)", value: fmtFull(Math.round(retirementPot * 0.04)), color: T.blue },
                   { label: "4% drawdown (monthly)", value: fmtFull(Math.round(retirementPot * 0.04 / 12)), color: T.green },
-                  { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || 11500)}/yr`, color: T.amber },
+                  { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT)}/yr`, color: T.amber },
                   ...(dbAnnualPension > 0 ? [{ label: "DB Pension (annual)", value: `${fmtFull(dbAnnualPension)}/yr`, color: T.purple, sub: "Guaranteed income" }] : []),
                 ].map((m, i) => (
                   <div key={i} style={{ flex: "1 1 170px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
@@ -1406,10 +1407,10 @@ function ProfileSettings({ profile, onSave, saving }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? 11500} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
+        <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? STATE_PENSION_ANNUAL_DEFAULT} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
           <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
-            Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default £11,500 is the full new State Pension (2025/26).
+            Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default {fmtFull(STATE_PENSION_ANNUAL_DEFAULT)} is the full new State Pension ({TAX_YEAR_LABEL}).
           </span>
         </div>
       </div>
@@ -1571,7 +1572,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
           ) : (
             <>
               <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono }}>{fmtFull(effectivePA)}</div>
-              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Full allowance · 2025/26 rate</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Full allowance · {TAX_YEAR_LABEL} rate</div>
             </>
           )}
         </div>

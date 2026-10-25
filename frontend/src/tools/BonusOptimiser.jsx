@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { T, Field, Btn } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { api } from "../api.js";
+import { TAX_YEAR_LABEL } from "../constants.js";
 
 export default function BonusOptimiser({ profile, settings }) {
   const [gross, setGross] = useState(profile.gross_salary || 50000);
@@ -29,7 +30,7 @@ export default function BonusOptimiser({ profile, settings }) {
 
   useEffect(() => { calculate(); }, []);
 
-  const regionLabel = taxRegion === "scotland" ? "Scotland (2025/26)" : "England / Wales / NI (2025/26)";
+  const regionLabel = taxRegion === "scotland" ? `Scotland (${TAX_YEAR_LABEL})` : `England / Wales / NI (${TAX_YEAR_LABEL})`;
 
   const combinedIncome = gross + bonus;
   const inAATaperZone = combinedIncome > 260000;
