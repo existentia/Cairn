@@ -104,7 +104,7 @@ def init_db():
             pension_contrib_pct REAL NOT NULL DEFAULT 0,
             employer_contrib_pct REAL NOT NULL DEFAULT 0,
             tax_code TEXT NOT NULL DEFAULT '1257L',
-            state_pension_annual REAL NOT NULL DEFAULT 11500,
+            state_pension_annual REAL NOT NULL DEFAULT 12548,
             employer_match_max_pct REAL NOT NULL DEFAULT 0,
             children_count INTEGER NOT NULL DEFAULT 0,
             spouse_income REAL NOT NULL DEFAULT 0,
@@ -148,7 +148,7 @@ def init_db():
             inflation_rate REAL NOT NULL DEFAULT 2.5,
             isa_allowance REAL NOT NULL DEFAULT 20000,
             pension_annual_allowance REAL NOT NULL DEFAULT 60000,
-            tax_year TEXT NOT NULL DEFAULT '2025/26',
+            tax_year TEXT NOT NULL DEFAULT '2026/27',
             tracker_margin REAL NOT NULL DEFAULT 0.5,
             mortgage_remaining_years INTEGER NOT NULL DEFAULT 20,
             net_worth_target REAL NOT NULL DEFAULT 0,
@@ -394,7 +394,7 @@ def update_profile():
         data.get("retirement_age", 57), data.get("gross_salary", 0),
         data.get("pension_contrib_pct", 0), data.get("employer_contrib_pct", 0),
         data.get("tax_code", "1257L"),
-        data.get("state_pension_annual", 11500),
+        data.get("state_pension_annual", uk_tax.STATE_PENSION_ANNUAL_DEFAULT),
         data.get("employer_match_max_pct", 0),
         data.get("children_count", 0), data.get("spouse_income", 0),
     ))
@@ -729,7 +729,7 @@ def update_settings():
     """, (
         data.get("growth_rate", 5.0), data.get("inflation_rate", 2.5),
         data.get("isa_allowance", 20000), data.get("pension_annual_allowance", 60000),
-        data.get("tax_year", "2025/26"),
+        data.get("tax_year", uk_tax.TAX_YEAR_LABEL),
         data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
         data.get("net_worth_target", 0), data.get("net_worth_target_date", ""),
         data.get("tax_region", "scotland"),
@@ -879,7 +879,7 @@ def _apply_import(db, data):
         """, (p.get("name",""), p.get("dob","1980-01-01"), p.get("retirement_age",57),
               p.get("gross_salary",0), p.get("pension_contrib_pct",0),
               p.get("employer_contrib_pct",0), p.get("tax_code","1257L"),
-              p.get("state_pension_annual",11500), p.get("employer_match_max_pct",0),
+              p.get("state_pension_annual",uk_tax.STATE_PENSION_ANNUAL_DEFAULT), p.get("employer_match_max_pct",0),
               p.get("children_count",0), p.get("spouse_income",0)))
 
     if "accounts" in data:
@@ -910,7 +910,7 @@ def _apply_import(db, data):
             WHERE id = 1
         """, (s.get("growth_rate",5.0), s.get("inflation_rate",2.5),
               s.get("isa_allowance",20000), s.get("pension_annual_allowance",60000),
-              s.get("tax_year","2025/26"),
+              s.get("tax_year",uk_tax.TAX_YEAR_LABEL),
               s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20),
               s.get("net_worth_target",0), s.get("net_worth_target_date",""),
               s.get("tax_region","scotland")))

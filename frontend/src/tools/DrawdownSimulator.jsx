@@ -4,10 +4,11 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { T, Field, fmt, ttStyle, ttItemStyle, ttLabelStyle } from "../ui.jsx";
+import { STATE_PENSION_ANNUAL_DEFAULT } from "../constants.js";
 import { fmtFull } from "../advisor.js";
 
 export default function DrawdownSimulator({ retirementPot, profile, settings, dbAnnualPension = 0 }) {
-  const spAnnual = (profile.state_pension_annual || 11500) + dbAnnualPension;
+  const spAnnual = (profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT) + dbAnnualPension;
   const realGrowth = Math.max(0, settings.growth_rate - settings.inflation_rate) / 100;
   const defaultMonthly = retirementPot > 0 ? Math.max(500, Math.round(retirementPot * 0.04 / 12)) : 2500;
   const [monthlySpend, setMonthlySpend] = useState(defaultMonthly);
