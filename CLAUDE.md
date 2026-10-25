@@ -55,7 +55,7 @@ Only view-level composition and cross-cutting dashboard state should stay in `Ap
 
 ## Domain rules and gotchas
 
-**Account types live in two mirrored constants modules.** `backend/uk_tax.py` and `frontend/src/constants.js` are the single source of truth for `ASSET_TYPES`, `LIABILITY_TYPES`, `INVESTMENT_PENSION_TYPES`, and `ISA_TYPES`. On the Python side `app.py`, `routes_tools.py` and `snapshots.py` import from `uk_tax`; on the JS side `App.jsx`, `advisor.js` and several `tools/*` components import from `constants.js`. When you add a new account type, update **both** modules — the JS and Python sets are not generated from each other, and a mismatch shows up as accounts silently missing from snapshot category totals.
+**Account types live in two mirrored constants modules.** `backend/uk_tax.py` and `frontend/src/constants.js` are the single source of truth for `ASSET_TYPES`, `LIABILITY_TYPES`, `INVESTMENT_PENSION_TYPES`, and `ISA_TYPES`. On the Python side `app.py`, `routes_tools.py` and `snapshots.py` import from `uk_tax`; on the JS side `App.jsx`, `advisor.js` and several `tools/*` components import from `constants.js`. Display labels are mirrored too: `ACCOUNT_LABELS` in `uk_tax.py` (used by the AI Insights prompt) and in `frontend/src/ui.jsx`. When you add a new account type, update **both** modules — the JS and Python sets are not generated from each other, and a mismatch shows up as accounts silently missing from snapshot category totals.
 
 **UK tax logic is hand-coded for 2025/26 in two mirrored modules.** `backend/uk_tax.py` holds Scottish (6-band) and rUK (3-band) income tax tables, NI thresholds, ISA/pension allowances, the pension AA carry-forward history, and a `calc_tax_ni(gross, sacrifice, region)` helper that the salary-sacrifice endpoint calls. `frontend/src/constants.js` mirrors the same numbers and exposes `getPriorTaxYears(currentLabel, count)` for the carry-forward tool. When the tax year rolls over, both files need updating — they are not generated from each other.
 
@@ -69,14 +69,14 @@ Only view-level composition and cross-cutting dashboard state should stay in `Ap
 
 ## External integrations
 
-- **Claude API** (`/api/ai/commentary`): uses the official `anthropic` Python SDK (pinned in `requirements.txt`), model `claude-sonnet-4-6`, no thinking + `effort: "low"` since commentary is plain text generation. System prompt (UK tax/savings persona) is marked with `cache_control: ephemeral` — currently below Sonnet 4.6's ~2k-token caching minimum so it's a silent no-op, but structurally ready if the persona grows. Only **numerical summaries** are sent — never raw account names or personal identifiers. Gated on `ANTHROPIC_API_KEY` (returns 503 if unset).
+- **Claude API** (`/api/ai/commentary`): uses the official `anthropic` Python SDK (pinned in `requirements.txt`), model `claude-sonnet-5-5`, `thinking: {"type": "between_tools"}` + `effort: "low"` since commentary is plain text generation (Sonnet 5.5 rejects `thinking: disabled` with a 400 — don't switch back to it). The system prompt is built once at import from `uk_tax` constants (inside a `<uk_rules>` block) so the figures Claude cites match the app's own calculations; per-user data goes in the user turn in XML tags. The system prompt is marked `cache_control: ephemeral` — currently below the minimum cacheable length so it's a silent no-op, but structurally ready if it grows. The UI renders the reply as plain text (`white-space: pre-wrap`), which is why the prompt asks for prose with no markdown. Only **numerical summaries** are sent — never raw account names or personal identifiers. Gated on `ANTHROPIC_API_KEY` (returns 503 if unset).
 - **Bank of England base rate** (`/api/rates/boe-base-rate`): scrapes the BoE statistical CSV API with a cookie-bearing opener (the endpoint requires a real session). Cached 24h in-process in `BOE_RATE_CACHE`. Has a comprehensive hard-coded fallback history if the fetch fails — preserve the fallback when modifying.
 
 ## Environment
 
 Env vars (set in `.env` for local, or in `docker-compose.yml` / Portainer for prod):
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD` — required. Single-user credentials. Changing `ADMIN_PASSWORD` and restarting wipes all existing browser sessions (see Auth above).
-- `ANTHROPIC_API_KEY` — optional, enables AI Copilot tab only
+- `ANTHROPIC_API_KEY` — optional, enables AI Insights tab only
 - `BACKUP_DIR` — optional, defaults to `<data>/backups`; where `cron_backup.py` writes
 - `BACKUP_RETAIN_DAYS` — optional, defaults to `14`
 - `DATA_DIR` — optional, read by `db_auth.py` to relocate `cairn.db`

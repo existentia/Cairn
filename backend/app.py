@@ -25,6 +25,7 @@ from uk_tax import (
     ASSET_TYPES, LIABILITY_TYPES,
     INVESTMENT_PENSION_TYPES, ISA_TYPES,
 )
+import uk_tax
 from snapshots import take_snapshot
 from migrations import run_migrations
 from db_auth import get_db, close_db, require_auth, DB_PATH
@@ -951,35 +952,37 @@ def _apply_import(db, data):
 import anthropic
 
 CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-sonnet-5-5"
 
-# Marked cacheable. Anthropic ignores cache_control on prefixes below ~2k tokens,
-# so today this is a no-op — but the structure is in place if the persona grows
-# (e.g. richer UK tax context). Volatile per-user data lives in the user turn.
-_COMMENTARY_SYSTEM_PROMPT = (
-    "You are a knowledgeable UK personal finance commentator. Provide a "
-    "concise, plain-English analysis of the person's financial position from "
-    "the data they share. Be direct, practical, and specific. Focus on "
-    "actionable observations and prioritise the things that would move the "
-    "needle most for them.\n\n"
-    "UK context to apply when relevant:\n"
-    "- ISA allowance £20,000/year; pension annual allowance £60,000, with "
-    "carry-forward of unused allowance from the 3 prior tax years.\n"
-    "- Scotland and rest-of-UK have different income tax bands; salary "
-    "sacrifice saves both income tax and employee NI.\n"
-    "- Personal Allowance tapers between £100k and £125,140 of income, "
-    "creating a ~60% effective marginal rate in that band.\n"
-    "- 4% Trinity-style drawdown is the common FIRE benchmark; 3.0–3.5% is "
-    "more conservative for early retirees with longer horizons.\n"
-    "- Full new State Pension is roughly £11,500/year from State Pension age "
-    "(currently 67). Private pension access age rises from 55 to 57 in "
-    "April 2028.\n\n"
-    "Do NOT give regulated financial advice — frame everything as general "
-    "observations. End with a one-line reminder that this is general "
-    "information, not advice.\n\n"
-    "Output: 3-4 short paragraphs of plain prose. No bullet lists, no "
-    "section headers."
-)
+
+def _gbp(n):
+    return f"£{n:,.0f}"
+
+
+# Built once at import from uk_tax so the figures Claude is told about always
+# match the ones the rest of the app calculates with. Marked cacheable: today
+# it sits below the model's minimum cacheable prefix, so caching is a silent
+# no-op, but it costs nothing. Everything per-user lives in the user turn so
+# this prefix stays stable.
+_COMMENTARY_SYSTEM_PROMPT = f"""You are a UK personal finance commentator built into Cairn, a self-hosted dashboard someone runs for their own finances. When they press a button, you write a short review of their position, which they read alongside the dashboard's own charts and rule-based insights.
+
+Write three or four short paragraphs of plain prose, roughly 250 to 350 words in total. The review appears in a plain-text panel that does not render markdown, so asterisks, hashes or list markers would show up as literal characters. Write it the way you would write a letter.
+
+Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value.
+
+This is general information, not regulated financial advice. You have not done a fact-find and cannot see their full circumstances, so frame suggestions as things worth considering or checking rather than instructions. Finish with a single sentence saying that this is general information rather than financial advice.
+
+The UK rules below are the ones Cairn uses for its own calculations. Rely on them rather than on figures you remember, so that your commentary agrees with the rest of the dashboard.
+
+<uk_rules tax_year="{uk_tax.TAX_YEAR_LABEL}">
+Personal Allowance is {_gbp(uk_tax.PERSONAL_ALLOWANCE)}. It tapers away by £1 for every £2 of income between {_gbp(uk_tax.PERSONAL_ALLOWANCE_TAPER_START)} and {_gbp(uk_tax.PERSONAL_ALLOWANCE_TAPER_END)}, which creates an effective marginal rate of around 60% (higher in Scotland) in that band.
+Scotland has six income tax bands; its {uk_tax.SCOTLAND_HIGHER_RATE_PCT}% higher rate starts at {_gbp(uk_tax.SCOTLAND_HIGHER_RATE_THRESHOLD)}. The rest of the UK has three bands; its {uk_tax.RUK_HIGHER_RATE_PCT}% higher rate starts at {_gbp(uk_tax.RUK_HIGHER_RATE_THRESHOLD)}. National Insurance is the same everywhere: {uk_tax.NI_RATE_MAIN:.0%} between {_gbp(uk_tax.NI_PRIMARY_THRESHOLD)} and {_gbp(uk_tax.NI_UPPER_EARNINGS_LIMIT)}, {uk_tax.NI_RATE_UEL_PLUS:.0%} above. Salary sacrifice into a pension saves both income tax and employee NI.
+ISA allowance is {_gbp(uk_tax.ISA_ANNUAL_ALLOWANCE)} a year across all ISAs. A Lifetime ISA takes up to {_gbp(uk_tax.LISA_ANNUAL_ALLOWANCE)} of that with a {uk_tax.LISA_BONUS_PCT}% government bonus, can be opened before {uk_tax.LISA_OPEN_MAX_AGE}, and is penalty-free from {uk_tax.LISA_ACCESS_AGE} or for a first home.
+Pension annual allowance is {_gbp(uk_tax.PENSION_ANNUAL_ALLOWANCE)}, with unused allowance carried forward from the three previous tax years. It tapers for very high earners (threshold income above {_gbp(uk_tax.AA_TAPER_THRESHOLD_INCOME)} and adjusted income above {_gbp(uk_tax.AA_TAPER_ADJUSTED_INCOME)}) to a minimum of {_gbp(uk_tax.AA_TAPER_MIN_ALLOWANCE)}.
+Private pensions can be accessed from 55, rising to {uk_tax.PENSION_ACCESS_AGE} in April 2028. State Pension age is {uk_tax.STATE_PENSION_AGE}, and the full new State Pension is roughly {_gbp(uk_tax.STATE_PENSION_ANNUAL_DEFAULT)} a year.
+Capital gains outside ISAs and pensions have a {_gbp(uk_tax.CGT_ANNUAL_ALLOWANCE)} annual exemption, then {uk_tax.CGT_BASIC_RATE_PCT}% or {uk_tax.CGT_HIGHER_RATE_PCT}%.
+For retirement drawdown, 4% is the common benchmark; 3 to 3.5% is more conservative for early retirees with longer horizons.
+</uk_rules>"""
 
 
 @app.route("/api/ai/commentary", methods=["POST"])
@@ -994,7 +997,7 @@ def ai_commentary():
     accounts = [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY sort_order, id").fetchall()]
     settings = dict(db.execute("SELECT * FROM settings WHERE id = 1").fetchone())
     snapshots = [dict(r) for r in db.execute(
-        "SELECT date, net_worth, total_assets, total_liabilities FROM snapshots ORDER BY date DESC LIMIT 12"
+        "SELECT date, net_worth FROM snapshots ORDER BY date DESC LIMIT 12"
     ).fetchall()]
 
     # Numerical summary only — no account names or personal identifiers.
@@ -1002,53 +1005,55 @@ def ai_commentary():
     total_liabilities = sum(abs(a["balance"]) for a in accounts if a["type"] in LIABILITY_TYPES)
     net_worth = total_assets - total_liabilities
 
+    today = date.today()
     try:
         dob = datetime.strptime(profile["dob"], "%Y-%m-%d").date()
-        today = date.today()
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
     except Exception:
-        age = 45
+        age = None  # Tell Claude it's missing rather than inventing one.
 
-    account_summary = []
+    retirement_age = profile.get("retirement_age")
+    if age is not None and retirement_age:
+        age_line = f"Age: {age}; target retirement age {retirement_age} ({retirement_age - age} years away)"
+    elif retirement_age:
+        age_line = f"Age: not provided; target retirement age {retirement_age}"
+    else:
+        age_line = f"Age: {age if age is not None else 'not provided'}; target retirement age not set"
+
+    account_lines = []
     for a in accounts:
-        entry = f"- {a['type']}: £{abs(a['balance']):,.0f}"
+        label = uk_tax.ACCOUNT_LABELS.get(a["type"], a["type"])
+        kind = "liability" if a["type"] in LIABILITY_TYPES else "asset"
+        entry = f"{label} ({kind}): {_gbp(abs(a['balance']))}"
         if a.get("interest_rate"):
-            rt = a.get("rate_type") or "APR"
-            entry += f" ({a['interest_rate']}% {rt})"
+            entry += f", {a['interest_rate']}% {a.get('rate_type') or 'APR'}"
         if a.get("monthly_contrib"):
-            entry += f", £{abs(a['monthly_contrib']):,.0f}/month contributions"
-        account_summary.append(entry)
+            entry += f", {_gbp(abs(a['monthly_contrib']))}/month contributions"
+        account_lines.append(entry)
 
-    pension_annual = profile["gross_salary"] * ((profile["pension_contrib_pct"] + profile["employer_contrib_pct"]) / 100)
+    gross = profile.get("gross_salary") or 0
+    emp_pct = profile.get("pension_contrib_pct") or 0
+    er_pct = profile.get("employer_contrib_pct") or 0
+    pension_annual = gross * (emp_pct + er_pct) / 100
     isa_monthly = sum((a.get("monthly_contrib") or 0) for a in accounts if a["type"] in ISA_TYPES)
+    region = "Scotland" if settings.get("tax_region", "scotland") == "scotland" else "rest of UK"
 
-    snapshot_trend = ""
-    if len(snapshots) >= 2:
-        latest = snapshots[0]["net_worth"]
-        oldest = snapshots[-1]["net_worth"]
-        snapshot_trend = (
-            f"Net worth trend over last {len(snapshots)} months: "
-            f"£{oldest:,.0f} → £{latest:,.0f} (change: £{latest - oldest:+,.0f})\n"
-        )
+    # Oldest first, so the trend reads left to right.
+    history_lines = [f"{s['date']}: {_gbp(s['net_worth'])}" for s in reversed(snapshots)]
 
     user_message = (
-        "FINANCIAL SNAPSHOT:\n"
-        f"- Age: {age}, target retirement age: {profile['retirement_age']} "
-        f"({profile['retirement_age'] - age} years)\n"
-        f"- Gross salary: £{profile['gross_salary']:,.0f}\n"
-        f"- Pension contributions: {profile['pension_contrib_pct']}% employee + "
-        f"{profile['employer_contrib_pct']}% employer = £{pension_annual:,.0f}/year\n"
-        f"- ISA monthly contributions: £{isa_monthly:,.0f}\n"
-        f"- Net worth: £{net_worth:,.0f} (assets: £{total_assets:,.0f}, "
-        f"liabilities: £{total_liabilities:,.0f})\n"
-        f"- Tax region: {settings.get('tax_region', 'scotland')}\n"
-        f"- Assumptions: {settings['growth_rate']}% growth, "
-        f"{settings['inflation_rate']}% inflation\n"
-        f"{snapshot_trend}\n"
-        "ACCOUNTS:\n"
-        + "\n".join(account_summary)
-        + "\n\nGive your analysis now. Be encouraging where appropriate but "
-        "honest about areas for improvement."
+        f'<financial_snapshot as_of="{today.isoformat()}">\n'
+        f"{age_line}\n"
+        f"Tax region: {region}\n"
+        f"Gross salary: {_gbp(gross)}\n"
+        f"Workplace pension: {emp_pct}% employee + {er_pct}% employer = {_gbp(pension_annual)}/year\n"
+        f"ISA contributions: {_gbp(isa_monthly)}/month\n"
+        f"Net worth: {_gbp(net_worth)} (assets {_gbp(total_assets)}, liabilities {_gbp(total_liabilities)})\n"
+        f"Planning assumptions: {settings['growth_rate']}% growth, {settings['inflation_rate']}% inflation\n"
+        "</financial_snapshot>\n\n"
+        "<accounts>\n" + ("\n".join(account_lines) or "No accounts entered") + "\n</accounts>\n\n"
+        "<net_worth_history>\n" + ("\n".join(history_lines) or "No snapshots yet") + "\n</net_worth_history>\n\n"
+        "Write the review."
     )
 
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
@@ -1056,8 +1061,10 @@ def ai_commentary():
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=1024,
-            # Plain text generation — no reasoning needed, keeps latency low.
-            thinking={"type": "disabled"},
+            # Sonnet 5.5 rejects thinking "disabled". "between_tools" only thinks
+            # between tool calls, so with no tools there's no up-front thinking;
+            # low effort keeps latency down for plain prose generation.
+            thinking={"type": "between_tools"},
             output_config={"effort": "low"},
             system=[{
                 "type": "text",

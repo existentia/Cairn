@@ -20,6 +20,18 @@ INVESTMENT_PENSION_TYPES = {"PENSION_DC", "SIPP"}
 ISA_TYPES = {"ISA_SS", "ISA_CASH", "ISA_LISA"}
 CASH_TYPES = {"CURRENT", "SAVINGS"}
 
+# Human-readable labels (mirror of ACCOUNT_LABELS in frontend/src/ui.jsx).
+ACCOUNT_LABELS = {
+    "PENSION_DC": "DC Pension", "SIPP": "SIPP", "PENSION_DB": "DB / Final Salary Pension",
+    "ISA_SS": "Stocks & Shares ISA", "ISA_CASH": "Cash ISA", "ISA_LISA": "Lifetime ISA",
+    "GIA": "General Investment Account",
+    "CURRENT": "Current Account", "SAVINGS": "Savings Account", "PROPERTY": "Property",
+    "MORTGAGE": "Mortgage", "CREDIT_CARD": "Credit Card", "LOAN": "Loan",
+}
+
+# Tax year the constants below describe. Update alongside the figures.
+TAX_YEAR_LABEL = "2025/26"
+
 # ── Income tax — 2025/26 ──────────────────────────────────────────────────────
 
 PERSONAL_ALLOWANCE = 12570

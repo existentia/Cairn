@@ -786,7 +786,7 @@ export default function App() {
 
         {/* Tabs */}
         <div className="c-tabs">
-          {[["overview", "Overview"], ["accounts", "Accounts"], ["update", "Update Balances"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Copilot"], ["settings", "Settings"]].map(([id, l]) => (
+          {[["overview", "Overview"], ["accounts", "Accounts"], ["update", "Update Balances"], ["goals", "Goals"], ["projections", "Projections"], ["advisor", "Advisor"], ["rates", "Rates & Mortgage"], ["tools", "Tools"], ["ai", "AI Insights"], ["settings", "Settings"]].map(([id, l]) => (
             <Tab key={id} label={l} active={tab === id} onClick={() => setTab(id)} />
           ))}
         </div>
@@ -1351,9 +1351,9 @@ export default function App() {
           <ToolsTab profile={profile} accounts={accounts} settings={settings} netWorth={netWorth} />
         )}
 
-        {/* ── AI COPILOT ───────────────────────────────────────── */}
+        {/* ── AI INSIGHTS ──────────────────────────────────────── */}
         {tab === "ai" && (
-          <AICopilotTab />
+          <AIInsightsTab />
         )}
 
         {/* Footer */}
@@ -2447,10 +2447,10 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   AI COPILOT TAB
+   AI INSIGHTS TAB
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function AICopilotTab() {
+function AIInsightsTab() {
   const [commentary, setCommentary] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -2477,7 +2477,7 @@ function AICopilotTab() {
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>AI Financial Copilot</h3>
+            <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>AI Insights</h3>
             <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
               Powered by Claude. Analyses your current financial position and provides plain-English commentary.
             </p>
