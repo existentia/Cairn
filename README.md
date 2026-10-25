@@ -114,7 +114,7 @@ recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
 - Link goals to auto-tracked values: overall net worth or a specific account type balance
 - Progress bar, percentage complete, days remaining, and "ACHIEVED ✓" badge
 
-### AI Copilot
+### AI Insights
 - Claude-powered natural language analysis of your financial position
 - Sends only numerical summaries — no personal identifiers
 
@@ -147,7 +147,7 @@ Edit `.env`:
 ```
 ADMIN_USERNAME=username
 ADMIN_PASSWORD=your-secure-password
-ANTHROPIC_API_KEY=sk-ant-...   # Optional: enables AI Copilot
+ANTHROPIC_API_KEY=sk-ant-...   # Optional: enables AI Insights
 BACKUP_DIR=/app/data/backups   # Optional: where cron writes daily backups (default shown)
 BACKUP_RETAIN_DAYS=14          # Optional: how many backups to keep (default 14)
 ```
@@ -175,7 +175,7 @@ you set above, then add your accounts and take a first snapshot.
 |----------|----------|---------|---------|
 | `ADMIN_USERNAME` | yes | `admin` | Single-user login name |
 | `ADMIN_PASSWORD` | yes | `changeme` | Login password; hashed at rest. Changing it invalidates all sessions |
-| `ANTHROPIC_API_KEY` | no | *(unset)* | Enables the AI Copilot tab; returns 503 when unset |
+| `ANTHROPIC_API_KEY` | no | *(unset)* | Enables the AI Insights tab; returns 503 when unset |
 | `BACKUP_DIR` | no | `/app/data/backups` | Where the daily backup cron writes SQLite copies |
 | `BACKUP_RETAIN_DAYS` | no | `14` | How many daily backups to keep before rotating |
 
@@ -310,7 +310,7 @@ your own direction.
 - Bearer tokens live in SQLite with a 7-day expiry; expired rows are sample-purged on ~1% of authenticated requests
 - Request bodies are capped at 5 MB
 - If exposing externally, use a reverse proxy with HTTPS and consider Authelia/Authentik
-- AI Copilot sends only numerical summaries to the Claude API — no personal identifiers
+- AI Insights sends only numerical summaries to the Claude API — no personal identifiers
 
 See [SECURITY.md](SECURITY.md) for the full threat model and how to report a vulnerability
 privately.

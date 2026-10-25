@@ -32,7 +32,7 @@ expect days rather than hours, and coordinate disclosure with me before publishi
 
 - All financial data stays in a local SQLite file (`data/cairn.db`); nothing is sent to a
   third-party service by default.
-- The optional AI Copilot sends **numerical summaries only** to the Claude API — never account
+- The optional AI Insights sends **numerical summaries only** to the Claude API — never account
   names, dates of birth, or other identifiers — and is disabled entirely unless
   `ANTHROPIC_API_KEY` is set.
 - The Bank of England base-rate lookup fetches a public statistical CSV and sends no user data.
