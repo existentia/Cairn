@@ -130,7 +130,7 @@ def bonus_optimiser_calc():
 @tools_bp.route("/iht-estimator", methods=["POST"])
 @require_auth
 def iht_estimator():
-    """Estimate IHT due on an estate. 2025/26 allowances (frozen to 2030)."""
+    """Estimate IHT due on an estate. Current-year allowances from uk_tax (NRB/RNRB frozen to April 2031)."""
     data = request.get_json() or {}
     estate = max(0, float(data.get("estate_value", 0)))
     married = bool(data.get("married", False))

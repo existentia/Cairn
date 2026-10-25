@@ -54,12 +54,12 @@ ACCOUNTS = [
 PROFILE = dict(
     name="Alex Morgan", dob="1988-03-14", retirement_age=60, gross_salary=72000,
     pension_contrib_pct=6, employer_contrib_pct=5, employer_match_max_pct=8,
-    tax_code="S1257L", state_pension_annual=11500, children_count=1, spouse_income=34000,
+    tax_code="S1257L", state_pension_annual=12548, children_count=1, spouse_income=34000,
 )
 
 SETTINGS = dict(
     growth_rate=5.0, inflation_rate=2.5, isa_allowance=20000,
-    pension_annual_allowance=60000, tax_year="2025/26", tracker_margin=0.75,
+    pension_annual_allowance=60000, tax_year="2026/27", tracker_margin=0.75,
     mortgage_remaining_years=18, net_worth_target=750000,
     net_worth_target_date="2032-04-01", tax_region="scotland",
 )

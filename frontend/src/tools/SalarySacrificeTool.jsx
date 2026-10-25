@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { T, Field, Btn } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { api } from "../api.js";
+import { TAX_YEAR_LABEL } from "../constants.js";
 
 export default function SalarySacrificeTool({ profile, settings }) {
   const [currentPct, setCurrentPct] = useState(profile.pension_contrib_pct || 5);
@@ -31,7 +32,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
 
   useEffect(() => { calculate(); }, []);
 
-  const regionLabel = taxRegion === "scotland" ? "Scotland (2025/26)" : "England / Wales / NI (2025/26)";
+  const regionLabel = taxRegion === "scotland" ? `Scotland (${TAX_YEAR_LABEL})` : `England / Wales / NI (${TAX_YEAR_LABEL})`;
 
   const StatRow = ({ label, current, proposed, highlight }) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>

@@ -1,4 +1,4 @@
-"""UK tax constants and helpers for the current tax year (2025/26).
+"""UK tax constants and helpers for the current tax year (2026/27).
 
 Centralised so that next year's update touches one file. Mirror of
 frontend/src/constants.js — keep in sync.
@@ -30,9 +30,9 @@ ACCOUNT_LABELS = {
 }
 
 # Tax year the constants below describe. Update alongside the figures.
-TAX_YEAR_LABEL = "2025/26"
+TAX_YEAR_LABEL = "2026/27"
 
-# ── Income tax — 2025/26 ──────────────────────────────────────────────────────
+# ── Income tax — 2026/27 ──────────────────────────────────────────────────────
 
 PERSONAL_ALLOWANCE = 12570
 PERSONAL_ALLOWANCE_TAPER_START = 100000
@@ -40,8 +40,8 @@ PERSONAL_ALLOWANCE_TAPER_END = 125140
 
 # Bands as (upper_bound, rate) above the personal allowance
 SCOTLAND_BANDS = [
-    (14876, 0.19),         # Starter
-    (26561, 0.20),         # Basic
+    (16537, 0.19),         # Starter  (2026/27: starter/basic thresholds up 7.4%)
+    (29526, 0.20),         # Basic
     (43662, 0.21),         # Intermediate
     (75000, 0.42),         # Higher
     (125140, 0.45),        # Advanced
@@ -58,14 +58,14 @@ RUK_HIGHER_RATE_THRESHOLD = 50270
 SCOTLAND_HIGHER_RATE_PCT = 42  # 42% income tax in the Scottish higher band
 RUK_HIGHER_RATE_PCT = 40
 
-# ── National Insurance Class 1 — 2025/26 ──────────────────────────────────────
+# ── National Insurance Class 1 — 2026/27 ──────────────────────────────────────
 
 NI_PRIMARY_THRESHOLD = 12570
 NI_UPPER_EARNINGS_LIMIT = 50270
 NI_RATE_MAIN = 0.08
 NI_RATE_UEL_PLUS = 0.02
 
-# Employer NI 2025/26
+# Employer NI 2026/27
 NI_SECONDARY_THRESHOLD = 5000
 NI_RATE_EMPLOYER = 0.15
 
@@ -95,9 +95,9 @@ CGT_HIGHER_RATE_PCT = 24
 #   - Fully tapered at £80k
 HICBC_THRESHOLD_START = 60000
 HICBC_THRESHOLD_END = 80000
-# Child Benefit weekly rates (2025/26)
-CB_WEEKLY_FIRST_CHILD = 26.05
-CB_WEEKLY_ADDITIONAL_CHILD = 17.25
+# Child Benefit weekly rates (2026/27)
+CB_WEEKLY_FIRST_CHILD = 27.05
+CB_WEEKLY_ADDITIONAL_CHILD = 17.90
 
 # Marriage Allowance
 #   - Non-taxpayer spouse transfers £1,260 of personal allowance to basic-rate partner
@@ -107,7 +107,7 @@ MARRIAGE_ALLOWANCE_TRANSFER = 1260
 MARRIAGE_ALLOWANCE_SAVING = 252
 MARRIAGE_ALLOWANCE_SPOUSE_MAX = 11310  # Safe spouse-income ceiling for full benefit
 
-# Inheritance Tax (frozen to 2030)
+# Inheritance Tax (NRB and RNRB frozen to April 2031)
 #   - 40% on estate value over the Nil Rate Band (NRB)
 #   - Residence NRB (RNRB) is an extra slice when main residence passes to
 #     direct descendants. Tapered by £1 per £2 over £2M, nil at £2.35M.
@@ -133,13 +133,14 @@ PENSION_AA_HISTORY = {
     "2014/15": 40000, "2015/16": 40000, "2016/17": 40000, "2017/18": 40000,
     "2018/19": 40000, "2019/20": 40000, "2020/21": 40000, "2021/22": 40000,
     "2022/23": 40000, "2023/24": 60000, "2024/25": 60000, "2025/26": 60000,
+    "2026/27": 60000,
 }
 
 # ── Ages ──────────────────────────────────────────────────────────────────────
 
 PENSION_ACCESS_AGE = 57            # Rises from 55 to 57 in April 2028
 STATE_PENSION_AGE = 67             # Forward-looking; phased rise from 66
-STATE_PENSION_ANNUAL_DEFAULT = 11500
+STATE_PENSION_ANNUAL_DEFAULT = 12548  # Full new State Pension 2026/27: £241.30/week
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

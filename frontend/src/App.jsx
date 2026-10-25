@@ -11,6 +11,7 @@ import {
   PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
   ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT, LISA_CONTRIB_MAX_AGE,
+  STATE_PENSION_ANNUAL_DEFAULT, TAX_YEAR_LABEL,
 } from "./constants.js";
 
 import {
@@ -1285,7 +1286,7 @@ export default function App() {
                   { label: "Projected pot at retirement", value: fmtFull(retirementPot), color: T.accent, sub: retirementPotLow && retirementPotHigh ? `±1σ: ${fmtFull(retirementPotLow)} – ${fmtFull(retirementPotHigh)}` : null },
                   { label: "4% drawdown (annual)", value: fmtFull(Math.round(retirementPot * 0.04)), color: T.blue },
                   { label: "4% drawdown (monthly)", value: fmtFull(Math.round(retirementPot * 0.04 / 12)), color: T.green },
-                  { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || 11500)}/yr`, color: T.amber },
+                  { label: "State Pension (est.)", value: `~${fmtFull(profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT)}/yr`, color: T.amber },
                   ...(dbAnnualPension > 0 ? [{ label: "DB Pension (annual)", value: `${fmtFull(dbAnnualPension)}/yr`, color: T.purple, sub: "Guaranteed income" }] : []),
                 ].map((m, i) => (
                   <div key={i} style={{ flex: "1 1 170px", padding: "12px 14px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
@@ -1406,10 +1407,10 @@ function ProfileSettings({ profile, onSave, saving }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? 11500} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
+        <Field label="State Pension (annual est.)" type="number" value={form.state_pension_annual ?? STATE_PENSION_ANNUAL_DEFAULT} onChange={(v) => upd("state_pension_annual", v)} prefix="£" />
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
           <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
-            Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default £11,500 is the full new State Pension (2025/26).
+            Check your forecast at <strong style={{ color: T.textMuted }}>check.gateway.gov.uk/state-pension-forecast</strong>. Default {fmtFull(STATE_PENSION_ANNUAL_DEFAULT)} is the full new State Pension ({TAX_YEAR_LABEL}).
           </span>
         </div>
       </div>
@@ -1571,7 +1572,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
           ) : (
             <>
               <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono }}>{fmtFull(effectivePA)}</div>
-              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Full allowance · 2025/26 rate</div>
+              <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2 }}>Full allowance · {TAX_YEAR_LABEL} rate</div>
             </>
           )}
         </div>
@@ -2451,44 +2452,72 @@ function ToolsTab({ profile, accounts, settings, netWorth }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function AIInsightsTab() {
-  const [commentary, setCommentary] = useState("");
+  // { commentary, generated_at, model, data_changed } — the last analysis,
+  // cached server-side so opening the tab doesn't call the Claude API.
+  const [cached, setCached] = useState(null);
+  const [checking, setChecking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const commentary = cached?.commentary || "";
 
-  const fetchCommentary = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    api.getCachedCommentary()
+      .then((res) => { if (!cancelled && res && !res.error) setCached(res); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const generate = async () => {
     setLoading(true);
     setError("");
-    setCommentary("");
     try {
-      const res = await api.getCommentary();
+      const res = await api.generateCommentary();
       if (res.error) {
+        // Keep showing the previous analysis; just report the failure.
         setError(res.error + (res.detail ? ` — ${res.detail}` : ""));
       } else {
-        setCommentary(res.commentary);
+        setCached(res);
       }
     } catch (e) {
-      setError(e.message || "Failed to fetch commentary");
+      setError(e.message || "Failed to generate analysis");
     }
     setLoading(false);
   };
 
+  // SQLite datetime('now') is UTC without a zone marker.
+  const generatedAt = cached?.generated_at
+    ? new Date(cached.generated_at.replace(" ", "T") + "Z").toLocaleString("en-GB", {
+        day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+      })
+    : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>AI Insights</h3>
             <p style={{ fontSize: 12, color: T.textDim, margin: 0 }}>
               Powered by Claude. Analyses your current financial position and provides plain-English commentary.
             </p>
           </div>
-          <Btn onClick={fetchCommentary} style={{ flexShrink: 0 }}>
-            {loading ? "Analysing..." : commentary ? "Refresh Analysis" : "Generate Analysis"}
-          </Btn>
+          {!checking && (
+            commentary ? (
+              <Btn variant="secondary" onClick={generate} disabled={loading} style={{ flexShrink: 0 }}>
+                {loading ? "Refreshing..." : "Refresh Analysis"}
+              </Btn>
+            ) : (
+              <Btn onClick={generate} disabled={loading} style={{ flexShrink: 0 }}>
+                {loading ? "Analysing..." : "Generate Analysis"}
+              </Btn>
+            )
+          )}
         </div>
 
         {error && (
-          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.red, lineHeight: 1.6 }}>
+          <div style={{ background: T.bg, border: `1px solid ${T.red}33`, borderRadius: T.radius, padding: "12px 16px", fontSize: 13, color: T.red, lineHeight: 1.6, marginBottom: commentary ? 12 : 0 }}>
             {error.includes("ANTHROPIC_API_KEY") ? (
               <>
                 <strong>API key not configured.</strong> Add your Anthropic API key to the Docker environment:
@@ -2509,16 +2538,24 @@ function AIInsightsTab() {
         )}
 
         {commentary && !loading && (
-          <div style={{
-            background: T.bg, borderRadius: T.radius, padding: "16px 20px",
-            fontSize: 13, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
-            borderLeft: `3px solid ${T.accent}`,
-          }}>
-            {commentary}
-          </div>
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", alignItems: "center", fontSize: 11, color: T.textDim, marginBottom: 8 }}>
+              {generatedAt && <span>Generated {generatedAt}</span>}
+              {cached?.data_changed && (
+                <span style={{ color: T.amber }}>Your figures have changed since this was generated — refresh to update it.</span>
+              )}
+            </div>
+            <div style={{
+              background: T.bg, borderRadius: T.radius, padding: "16px 20px",
+              fontSize: 13, color: T.text, lineHeight: 1.75, whiteSpace: "pre-wrap",
+              borderLeft: `3px solid ${T.accent}`,
+            }}>
+              {commentary}
+            </div>
+          </>
         )}
 
-        {!commentary && !loading && !error && (
+        {!checking && !commentary && !loading && !error && (
           <div style={{ padding: "40px 20px", textAlign: "center", color: T.textDim, fontSize: 13 }}>
             Click <strong>Generate Analysis</strong> to get an AI-powered review of your financial position.
             <br /><br />

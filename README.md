@@ -103,7 +103,7 @@ recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
 - **Salary Sacrifice Calculator** — Scottish and rUK income tax bands, NI savings, effective cost, employer NI saving, take-home impact
 - **Bonus Optimiser** — Model a one-off lump sum (annual bonus, RSU vest) as cash vs sacrifice-to-pension; shows marginal rate, take-home impact, and total value gained. Warns when the bonus pushes you into the PA taper or additional-rate band
 - **Marginal Rate Curve** — plots your effective marginal tax + NI rate across £0–£200k, making the 60% PA-taper zone and HICBC ramp visible, with markers at your current and after-sacrifice salary
-- **IHT Estimator** — Inheritance tax calculator using 2025/26 allowances. NRB + RNRB taper (>£2M), transferable allowances for married couples, reduced 36% rate for 10%+ charitable bequests
+- **IHT Estimator** — Inheritance tax calculator using 2026/27 allowances. NRB + RNRB taper (>£2M), transferable allowances for married couples, reduced 36% rate for 10%+ charitable bequests
 - **Debt Payoff Planner** — Avalanche vs snowball comparison with total interest saved
 - **Mortgage Scenarios** — Model different rates, terms, and overpayment strategies
 - **Carry-Forward Pension Calculator** — Auto-rolls to the current tax year using a built-in pension annual-allowance history (2014/15 onwards). Editable prior-year inputs persist locally per tax year; calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year
@@ -192,7 +192,7 @@ cairn/
 │   ├── app.py              # Flask API + static serving
 │   ├── db_auth.py          # Shared get_db / require_auth (used by blueprints)
 │   ├── routes_tools.py     # Calculator endpoints blueprint (/api/tools/*)
-│   ├── uk_tax.py           # UK tax constants + calc helpers (2025/26)
+│   ├── uk_tax.py           # UK tax constants + calc helpers (2026/27)
 │   ├── snapshots.py        # Shared snapshot writer + idempotent backfill
 │   ├── migrations.py       # Named schema/data migrations
 │   ├── cron_snapshot.py    # Automated monthly snapshots
@@ -319,7 +319,7 @@ privately.
 
 General financial information only — **not regulated advice**. Cairn is not authorised by the
 FCA and nothing it produces is a personal recommendation. Tax rules are hand-coded for the
-2025/26 UK tax year and may be incomplete, out of date, or simply wrong; projections use
+2026/27 UK tax year and may be incomplete, out of date, or simply wrong; projections use
 simplified models that ignore sequence-of-returns risk, fees, and most edge cases. Check
 anything important against HMRC guidance and consult an FCA-regulated adviser before acting.
 

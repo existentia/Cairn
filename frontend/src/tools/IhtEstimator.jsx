@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { T, Field, Btn } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { api } from "../api.js";
+import { TAX_YEAR_LABEL } from "../constants.js";
 
 export default function IhtEstimator({ netWorth, accounts }) {
   // Pre-fill with current estate value and whether there's a property
@@ -52,7 +53,7 @@ export default function IhtEstimator({ netWorth, accounts }) {
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>Inheritance Tax Estimator</h3>
         <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
-          Estimates IHT due on your estate using 2025/26 allowances (frozen to 2030).
+          Estimates IHT due on your estate using {TAX_YEAR_LABEL} allowances (frozen to April 2031).
           Standard rate 40% above the Nil Rate Band; reduced rate 36% if 10%+ goes to charity.
         </p>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>

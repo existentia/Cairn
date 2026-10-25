@@ -70,6 +70,36 @@ def _m_backfill_investments_category(db):
             )
 
 
+def _m_roll_tax_year_2026_27(db):
+    """Move installs still sitting on the old 2025/26 defaults to 2026/27.
+
+    settings.tax_year isn't editable in the UI, so without this every
+    existing database would keep reporting 2025/26 after the constants
+    rolled over. The State Pension estimate is only bumped when it still
+    equals the old default (the full new State Pension); a figure the user
+    entered from their own forecast is left alone. Values are hard-coded
+    rather than read from uk_tax so this migration means the same thing
+    whenever it runs.
+    """
+    db.execute("UPDATE settings SET tax_year = '2026/27' WHERE tax_year = '2025/26'")
+    db.execute("UPDATE profile SET state_pension_annual = 12548 WHERE state_pension_annual = 11500")
+
+
+def _m_create_ai_commentary(db):
+    """Single-row cache for the last AI Insights analysis, so opening the tab
+    doesn't call (and pay for) the Claude API every time. input_hash lets the
+    UI say when the underlying figures have changed since it was generated."""
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS ai_commentary ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " commentary TEXT NOT NULL,"
+        " model TEXT NOT NULL DEFAULT '',"
+        " input_hash TEXT NOT NULL DEFAULT '',"
+        " generated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+        ")"
+    )
+
+
 # Migrations are applied in list order. Names are permanent — they are
 # the key in `schema_migrations`. Don't rename or remove past entries.
 MIGRATIONS = [
@@ -99,6 +129,8 @@ MIGRATIONS = [
     ("013_profile_add_spouse_income",
      _alter_add_column("profile", "spouse_income REAL NOT NULL DEFAULT 0")),
     ("014_backfill_investments_category", _m_backfill_investments_category),
+    ("015_roll_tax_year_2026_27", _m_roll_tax_year_2026_27),
+    ("016_create_ai_commentary", _m_create_ai_commentary),
 ]
 
 

@@ -104,7 +104,7 @@ def init_db():
             pension_contrib_pct REAL NOT NULL DEFAULT 0,
             employer_contrib_pct REAL NOT NULL DEFAULT 0,
             tax_code TEXT NOT NULL DEFAULT '1257L',
-            state_pension_annual REAL NOT NULL DEFAULT 11500,
+            state_pension_annual REAL NOT NULL DEFAULT 12548,
             employer_match_max_pct REAL NOT NULL DEFAULT 0,
             children_count INTEGER NOT NULL DEFAULT 0,
             spouse_income REAL NOT NULL DEFAULT 0,
@@ -148,7 +148,7 @@ def init_db():
             inflation_rate REAL NOT NULL DEFAULT 2.5,
             isa_allowance REAL NOT NULL DEFAULT 20000,
             pension_annual_allowance REAL NOT NULL DEFAULT 60000,
-            tax_year TEXT NOT NULL DEFAULT '2025/26',
+            tax_year TEXT NOT NULL DEFAULT '2026/27',
             tracker_margin REAL NOT NULL DEFAULT 0.5,
             mortgage_remaining_years INTEGER NOT NULL DEFAULT 20,
             net_worth_target REAL NOT NULL DEFAULT 0,
@@ -394,7 +394,7 @@ def update_profile():
         data.get("retirement_age", 57), data.get("gross_salary", 0),
         data.get("pension_contrib_pct", 0), data.get("employer_contrib_pct", 0),
         data.get("tax_code", "1257L"),
-        data.get("state_pension_annual", 11500),
+        data.get("state_pension_annual", uk_tax.STATE_PENSION_ANNUAL_DEFAULT),
         data.get("employer_match_max_pct", 0),
         data.get("children_count", 0), data.get("spouse_income", 0),
     ))
@@ -729,7 +729,7 @@ def update_settings():
     """, (
         data.get("growth_rate", 5.0), data.get("inflation_rate", 2.5),
         data.get("isa_allowance", 20000), data.get("pension_annual_allowance", 60000),
-        data.get("tax_year", "2025/26"),
+        data.get("tax_year", uk_tax.TAX_YEAR_LABEL),
         data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
         data.get("net_worth_target", 0), data.get("net_worth_target_date", ""),
         data.get("tax_region", "scotland"),
@@ -879,7 +879,7 @@ def _apply_import(db, data):
         """, (p.get("name",""), p.get("dob","1980-01-01"), p.get("retirement_age",57),
               p.get("gross_salary",0), p.get("pension_contrib_pct",0),
               p.get("employer_contrib_pct",0), p.get("tax_code","1257L"),
-              p.get("state_pension_annual",11500), p.get("employer_match_max_pct",0),
+              p.get("state_pension_annual",uk_tax.STATE_PENSION_ANNUAL_DEFAULT), p.get("employer_match_max_pct",0),
               p.get("children_count",0), p.get("spouse_income",0)))
 
     if "accounts" in data:
@@ -910,7 +910,7 @@ def _apply_import(db, data):
             WHERE id = 1
         """, (s.get("growth_rate",5.0), s.get("inflation_rate",2.5),
               s.get("isa_allowance",20000), s.get("pension_annual_allowance",60000),
-              s.get("tax_year","2025/26"),
+              s.get("tax_year",uk_tax.TAX_YEAR_LABEL),
               s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20),
               s.get("net_worth_target",0), s.get("net_worth_target_date",""),
               s.get("tax_region","scotland")))
@@ -949,6 +949,8 @@ def _apply_import(db, data):
 
 # ── AI Commentary (Claude API) ────────────────────────────────────────────────
 
+import hashlib
+
 import anthropic
 
 CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -968,7 +970,9 @@ _COMMENTARY_SYSTEM_PROMPT = f"""You are a UK personal finance commentator built 
 
 Write three or four short paragraphs of plain prose, roughly 250 to 350 words in total. The review appears in a plain-text panel that does not render markdown, so asterisks, hashes or list markers would show up as literal characters. Write it the way you would write a letter.
 
-Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value.
+Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value. Cairn does not record spending or a target retirement income, so don't list those as missing data; where they matter for judging whether retirement is on track, suggest the user tries their own figures in Cairn's FIRE calculator or drawdown simulator.
+
+The retirement income section lists the guaranteed income Cairn knows about. Use the State Pension figure as given and say whether it is the user's own forecast or Cairn's default, because a default may overstate what someone with gaps in their National Insurance record will get. Bear in mind that it only starts at State Pension age, so any years between the target retirement age and State Pension age have to be bridged from savings.
 
 This is general information, not regulated financial advice. You have not done a fact-find and cannot see their full circumstances, so frame suggestions as things worth considering or checking rather than instructions. Finish with a single sentence saying that this is general information rather than financial advice.
 
@@ -985,14 +989,13 @@ For retirement drawdown, 4% is the common benchmark; 3 to 3.5% is more conservat
 </uk_rules>"""
 
 
-@app.route("/api/ai/commentary", methods=["POST"])
-@require_auth
-def ai_commentary():
-    """Generate natural-language financial commentary using the Claude API."""
-    if not CLAUDE_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 503
+def _build_commentary_input(db):
+    """Return the per-user data block sent to Claude (without the as-of date).
 
-    db = get_db()
+    Kept separate from the request so the cached analysis can be checked
+    against current data: a hash of this block is stored with each cached
+    reply, and a mismatch means the figures have changed since.
+    """
     profile = dict(db.execute("SELECT * FROM profile WHERE id = 1").fetchone())
     accounts = [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY sort_order, id").fetchall()]
     settings = dict(db.execute("SELECT * FROM settings WHERE id = 1").fetchone())
@@ -1029,6 +1032,8 @@ def ai_commentary():
             entry += f", {a['interest_rate']}% {a.get('rate_type') or 'APR'}"
         if a.get("monthly_contrib"):
             entry += f", {_gbp(abs(a['monthly_contrib']))}/month contributions"
+        if a["type"] == "PENSION_DB" and a.get("db_annual_pension"):
+            entry += f", pays {_gbp(a['db_annual_pension'])}/year from scheme pension age"
         account_lines.append(entry)
 
     gross = profile.get("gross_salary") or 0
@@ -1038,11 +1043,28 @@ def ai_commentary():
     isa_monthly = sum((a.get("monthly_contrib") or 0) for a in accounts if a["type"] in ISA_TYPES)
     region = "Scotland" if settings.get("tax_region", "scotland") == "scotland" else "rest of UK"
 
+    # Retirement income Cairn already knows about. The State Pension figure is
+    # the user's own forecast (or the full-rate default if they never changed it).
+    sp_annual = profile.get("state_pension_annual") or 0
+    sp_is_default = round(sp_annual) == uk_tax.STATE_PENSION_ANNUAL_DEFAULT
+    db_income = sum((a.get("db_annual_pension") or 0) for a in accounts if a["type"] == "PENSION_DB")
+    retirement_lines = [
+        f"State Pension: {_gbp(sp_annual)}/year from State Pension age {uk_tax.STATE_PENSION_AGE}"
+        + (" (Cairn's full-rate default; the user hasn't entered their own forecast)" if sp_is_default
+           else " (the user's own forecast)"),
+        f"Defined benefit pension income: {_gbp(db_income)}/year" if db_income
+        else "Defined benefit pension income: none recorded",
+    ]
+    if settings.get("net_worth_target"):
+        target = f"Net worth target: {_gbp(settings['net_worth_target'])}"
+        if settings.get("net_worth_target_date"):
+            target += f" by {settings['net_worth_target_date']}"
+        retirement_lines.append(target)
+
     # Oldest first, so the trend reads left to right.
     history_lines = [f"{s['date']}: {_gbp(s['net_worth'])}" for s in reversed(snapshots)]
 
-    user_message = (
-        f'<financial_snapshot as_of="{today.isoformat()}">\n'
+    return (
         f"{age_line}\n"
         f"Tax region: {region}\n"
         f"Gross salary: {_gbp(gross)}\n"
@@ -1051,9 +1073,53 @@ def ai_commentary():
         f"Net worth: {_gbp(net_worth)} (assets {_gbp(total_assets)}, liabilities {_gbp(total_liabilities)})\n"
         f"Planning assumptions: {settings['growth_rate']}% growth, {settings['inflation_rate']}% inflation\n"
         "</financial_snapshot>\n\n"
+        "<retirement_income>\n" + "\n".join(retirement_lines) + "\n</retirement_income>\n\n"
         "<accounts>\n" + ("\n".join(account_lines) or "No accounts entered") + "\n</accounts>\n\n"
-        "<net_worth_history>\n" + ("\n".join(history_lines) or "No snapshots yet") + "\n</net_worth_history>\n\n"
-        "Write the review."
+        "<net_worth_history>\n" + ("\n".join(history_lines) or "No snapshots yet") + "\n</net_worth_history>"
+    )
+
+
+def _input_hash(block):
+    return hashlib.sha256(block.encode("utf-8")).hexdigest()
+
+
+def _cached_commentary(db, current_hash=None):
+    row = db.execute(
+        "SELECT commentary, model, input_hash, generated_at FROM ai_commentary WHERE id = 1"
+    ).fetchone()
+    if not row:
+        return {"commentary": None}
+    out = {
+        "commentary": row["commentary"],
+        "model": row["model"],
+        "generated_at": row["generated_at"],
+    }
+    if current_hash is not None:
+        out["data_changed"] = row["input_hash"] != current_hash
+    return out
+
+
+@app.route("/api/ai/commentary", methods=["GET"])
+@require_auth
+def get_ai_commentary():
+    """Return the last generated analysis (if any) without calling Claude."""
+    db = get_db()
+    return jsonify(_cached_commentary(db, _input_hash(_build_commentary_input(db))))
+
+
+@app.route("/api/ai/commentary", methods=["POST"])
+@require_auth
+def ai_commentary():
+    """Generate a fresh analysis with the Claude API and cache it."""
+    if not CLAUDE_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 503
+
+    db = get_db()
+    block = _build_commentary_input(db)
+    user_message = (
+        f'<financial_snapshot as_of="{date.today().isoformat()}">\n'
+        + block
+        + "\n\nWrite the review."
     )
 
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
@@ -1082,8 +1148,18 @@ def ai_commentary():
     except anthropic.APIError as e:
         return jsonify({"error": f"Claude API error: {e}"}), 502
 
-    text = "".join(block.text for block in response.content if block.type == "text")
-    return jsonify({"commentary": text})
+    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    if not text:
+        return jsonify({"error": "Claude returned an empty response — try again"}), 502
+
+    current_hash = _input_hash(block)
+    db.execute(
+        "INSERT OR REPLACE INTO ai_commentary (id, commentary, model, input_hash, generated_at)"
+        " VALUES (1, ?, ?, ?, datetime('now'))",
+        (text, CLAUDE_MODEL, current_hash),
+    )
+    db.commit()
+    return jsonify(_cached_commentary(db, current_hash))
 
 
 # ── BoE Base Rate Data ────────────────────────────────────────────────────────

@@ -24,7 +24,7 @@ import {
   MARRIAGE_ALLOWANCE_TRANSFER, MARRIAGE_ALLOWANCE_SAVING,
   MARRIAGE_ALLOWANCE_SPOUSE_MAX,
   PERSONAL_ALLOWANCE,
-  daysUntilTaxYearEnd,
+  daysUntilTaxYearEnd, TAX_YEAR_LABEL,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -118,7 +118,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
     const realisable = Math.min(totalGiaGain, CGT_ANNUAL_ALLOWANCE);
     insights.push({
       type: "opportunity", category: "tax", title: "Use Your CGT Allowance",
-      detail: `Your GIA holdings show ${fmtFull(totalGiaGain)} in unrealised gains. The 2025/26 CGT annual exempt amount is £${CGT_ANNUAL_ALLOWANCE.toLocaleString()} — gains above that are taxed at ${rate}% at your marginal rate. Consider realising ${fmtFull(realisable)} of gains this tax year (sell, then re-buy inside your S&S ISA — "bed & ISA") to use the allowance and shelter future growth tax-free. Allowance cannot be carried forward.`,
+      detail: `Your GIA holdings show ${fmtFull(totalGiaGain)} in unrealised gains. The ${TAX_YEAR_LABEL} CGT annual exempt amount is £${CGT_ANNUAL_ALLOWANCE.toLocaleString()} — gains above that are taxed at ${rate}% at your marginal rate. Consider realising ${fmtFull(realisable)} of gains this tax year (sell, then re-buy inside your S&S ISA — "bed & ISA") to use the allowance and shelter future growth tax-free. Allowance cannot be carried forward.`,
       priority: 2,
     });
   }
@@ -307,7 +307,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // valuable sal-sac case for parents.
   const childrenCount = profile.children_count || 0;
   if (childrenCount > 0 && profile.gross_salary > HICBC_THRESHOLD_START) {
-    // Annual Child Benefit at 2025/26 rates
+    // Annual Child Benefit at current-year rates
     const cbAnnual = Math.round(
       CB_WEEKLY_FIRST_CHILD * 52
       + CB_WEEKLY_ADDITIONAL_CHILD * 52 * Math.max(0, childrenCount - 1)
