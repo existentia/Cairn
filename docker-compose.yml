@@ -13,8 +13,6 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - BACKUP_DIR=${BACKUP_DIR:-/app/data/backups}
       - BACKUP_RETAIN_DAYS=${BACKUP_RETAIN_DAYS:-14}
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
 
 volumes:
   cairn_data:
