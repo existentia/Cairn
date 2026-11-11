@@ -136,6 +136,16 @@ PENSION_AA_HISTORY = {
     "2026/27": 60000,
 }
 
+# Pension tax-free cash: 25% of each withdrawal, capped in total by the
+# Lump Sum Allowance.
+PENSION_TAX_FREE_FRACTION = 0.25
+LUMP_SUM_ALLOWANCE = 268275
+
+# From 6 April 2029 only the first £2,000 a year of salary-sacrificed pension
+# contributions is exempt from NI (employee and employer); income tax relief
+# is unchanged. Applied only when a tool asks for the 2029 rules.
+SALARY_SACRIFICE_NI_CAP = 2000
+
 # ── Ages ──────────────────────────────────────────────────────────────────────
 
 PENSION_ACCESS_AGE = 57            # Rises from 55 to 57 in April 2028
@@ -196,22 +206,27 @@ def calc_income_tax(income, region="scotland"):
     return tax
 
 
-def calc_tax_ni(gross_salary, sacrifice=0, region="scotland"):
+def calc_tax_ni(gross_salary, sacrifice=0, region="scotland", ni_cap=None):
     """Income tax + NI for the current tax year. Returns a dict with
-    taxable_income, income_tax, employee_ni, employer_ni, take_home."""
+    taxable_income, income_tax, employee_ni, employer_ni, take_home.
+
+    `ni_cap` models the April 2029 rules: only the first `ni_cap` pounds of
+    the sacrifice escape NI, so NI is charged on gross minus that capped
+    amount. With ni_cap=None (today's rules) the whole sacrifice is NI-free."""
     taxable = gross_salary - sacrifice
     income_tax = calc_income_tax(taxable, region)
+    ni_base = taxable if ni_cap is None else gross_salary - min(sacrifice, ni_cap)
 
-    ni_earnings = max(0, taxable - NI_PRIMARY_THRESHOLD)
-    if taxable <= NI_UPPER_EARNINGS_LIMIT:
+    ni_earnings = max(0, ni_base - NI_PRIMARY_THRESHOLD)
+    if ni_base <= NI_UPPER_EARNINGS_LIMIT:
         employee_ni = ni_earnings * NI_RATE_MAIN
     else:
         employee_ni = (
             (NI_UPPER_EARNINGS_LIMIT - NI_PRIMARY_THRESHOLD) * NI_RATE_MAIN
-            + (taxable - NI_UPPER_EARNINGS_LIMIT) * NI_RATE_UEL_PLUS
+            + (ni_base - NI_UPPER_EARNINGS_LIMIT) * NI_RATE_UEL_PLUS
         )
 
-    employer_ni = max(0, taxable - NI_SECONDARY_THRESHOLD) * NI_RATE_EMPLOYER
+    employer_ni = max(0, ni_base - NI_SECONDARY_THRESHOLD) * NI_RATE_EMPLOYER
 
     return {
         "taxable_income": round(taxable),

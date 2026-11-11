@@ -114,10 +114,11 @@ VALID_ACCOUNT_TYPES = ASSET_TYPES | LIABILITY_TYPES
 # Writable columns per table, by kind. Anything not listed is ignored, and
 # these tuples are the only source of column names for the dynamic SQL below.
 _ACCOUNT_NUMBERS = ("balance", "monthly_contrib", "interest_rate", "sort_order",
-                    "total_contributed", "db_annual_pension", "unrealised_gain")
-_ACCOUNT_TEXT = ("provider", "rate_type", "fixed_until", "term_end_date", "notes")
+                    "total_contributed", "db_annual_pension", "unrealised_gain", "ytd_contrib")
+_ACCOUNT_TEXT = ("provider", "rate_type", "fixed_until", "term_end_date", "notes", "ytd_tax_year")
 _PROFILE_NUMBERS = ("retirement_age", "gross_salary", "pension_contrib_pct", "employer_contrib_pct",
-                    "state_pension_annual", "employer_match_max_pct", "children_count", "spouse_income")
+                    "state_pension_annual", "employer_match_max_pct", "children_count", "spouse_income",
+                    "monthly_spending")
 _PROFILE_TEXT = ("name", "tax_code")
 _SETTINGS_NUMBERS = ("growth_rate", "inflation_rate", "isa_allowance", "pension_annual_allowance",
                      "tracker_margin", "mortgage_remaining_years", "net_worth_target")
@@ -974,7 +975,7 @@ _COMMENTARY_SYSTEM_PROMPT = f"""You are a UK personal finance commentator built 
 
 Write three or four short paragraphs of plain prose, roughly 250 to 350 words in total. The review appears in a plain-text panel that does not render markdown, so asterisks, hashes or list markers would show up as literal characters. Write it the way you would write a letter.
 
-Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value. Cairn does not record spending or a target retirement income, so don't list those as missing data; where they matter for judging whether retirement is on track, suggest the user tries their own figures in Cairn's FIRE calculator or drawdown simulator.
+Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value. Cairn does not record a target retirement income, and monthly spending appears in the data only if the user has entered it. Where a spending figure is given, use it to judge whether the projected retirement income looks sufficient. Where it is absent, don't list it as missing data; if it matters for judging whether retirement is on track, suggest the user tries their own figures in Cairn's FIRE calculator or drawdown simulator.
 
 The retirement income section lists the guaranteed income Cairn knows about. Use the State Pension figure as given and say whether it is the user's own forecast or Cairn's default, because a default may overstate what someone with gaps in their National Insurance record will get. Bear in mind that it only starts at State Pension age, so any years between the target retirement age and State Pension age have to be bridged from savings.
 
@@ -1074,6 +1075,9 @@ def _build_commentary_input(db):
         f"Gross salary: {_gbp(gross)}\n"
         f"Workplace pension: {emp_pct}% employee + {er_pct}% employer = {_gbp(pension_annual)}/year\n"
         f"ISA contributions: {_gbp(isa_monthly)}/month\n"
+        + (f"Monthly spending (entered by the user): {_gbp(profile['monthly_spending'])}\n"
+           if profile.get("monthly_spending") else "")
+        +
         f"Net worth: {_gbp(net_worth)} (assets {_gbp(total_assets)}, liabilities {_gbp(total_liabilities)})\n"
         f"Planning assumptions: {settings['growth_rate']}% growth, {settings['inflation_rate']}% inflation\n"
         "</financial_snapshot>\n\n"

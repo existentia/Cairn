@@ -116,6 +116,15 @@ export const PENSION_AA_HISTORY = {
   "2026/27": 60000,
 };
 
+// Pension tax-free cash: 25% of each withdrawal, capped in total by the
+// Lump Sum Allowance.
+export const PENSION_TAX_FREE_FRACTION = 0.25;
+export const LUMP_SUM_ALLOWANCE = 268275;
+
+// From 6 April 2029 only the first £2,000 a year of salary-sacrificed pension
+// contributions is exempt from NI; income tax relief is unchanged.
+export const SALARY_SACRIFICE_NI_CAP = 2000;
+
 // Ages
 export const PENSION_ACCESS_AGE = 57; // From April 2028
 export const STATE_PENSION_AGE = 67; // Fallback when no date of birth is known — prefer statePensionAge(dob)
@@ -187,6 +196,45 @@ export function getPriorTaxYears(currentLabel, count = 3) {
     out.push({ label, allowance: PENSION_AA_HISTORY[label] ?? PENSION_ANNUAL_ALLOWANCE });
   }
   return out;
+}
+
+// The tax year the calendar says we are in ("2026/27"), independent of which
+// year's constants this file holds. Tax years start on 6 April.
+export function currentTaxYearLabel(now = new Date()) {
+  const afterStart = now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6);
+  return formatTaxYear(afterStart ? now.getFullYear() : now.getFullYear() - 1);
+}
+
+// Whole monthly payments still to come before 5 April.
+export function monthsLeftInTaxYear(now = new Date()) {
+  return Math.max(0, Math.floor(daysUntilTaxYearEnd(now) / 30.44));
+}
+
+// What one account will have had paid in by the end of this tax year.
+// If the user has recorded the amount paid so far this tax year (ytd_contrib,
+// stamped with ytd_tax_year) that figure is used and the regular contribution
+// is only added for the months remaining. Otherwise — nothing recorded, or
+// the stamp is from an earlier year — it falls back to monthly × 12.
+// Returns { projected, paid, actual }; `paid` is null when estimating.
+export function taxYearContribution(account, now = new Date()) {
+  const monthly = account.monthly_contrib || 0;
+  if (account.ytd_tax_year && account.ytd_tax_year === currentTaxYearLabel(now)) {
+    const paid = account.ytd_contrib || 0;
+    return { projected: paid + monthly * monthsLeftInTaxYear(now), paid, actual: true };
+  }
+  return { projected: monthly * 12, paid: null, actual: false };
+}
+
+// Totals across a list of accounts. `anyActual` says whether any figure came
+// from a recorded amount rather than the monthly × 12 estimate.
+export function sumTaxYearContributions(accounts, now = new Date()) {
+  let projected = 0, paid = 0, anyActual = false;
+  for (const a of accounts) {
+    const c = taxYearContribution(a, now);
+    projected += c.projected;
+    if (c.actual) { paid += c.paid; anyActual = true; }
+  }
+  return { projected, paid, anyActual };
 }
 
 // UK tax year ends on 5 April. Returns whole days until the next 5 April

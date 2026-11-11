@@ -14,6 +14,7 @@ from uk_tax import (
     calc_tax_ni,
     IHT_NRB, IHT_RNRB, IHT_RNRB_TAPER_START,
     IHT_RATE_STANDARD, IHT_RATE_REDUCED, IHT_REDUCED_RATE_CHARITY_PCT,
+    SALARY_SACRIFICE_NI_CAP,
 )
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/api/tools")
@@ -36,14 +37,20 @@ def salary_sacrifice_calc():
     proposed_sacrifice = gross * (proposed_pct / 100)
     employer_contrib = gross * (employer_pct / 100)
 
-    current = calc_tax_ni(gross, current_sacrifice, tax_region)
-    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region)
+    # Optional: the April 2029 rules, where NI relief on sacrificed pension
+    # contributions is capped at the first £2,000 a year.
+    apply_cap = bool(data.get("apply_2029_ni_cap", False))
+    ni_cap = SALARY_SACRIFICE_NI_CAP if apply_cap else None
+
+    current = calc_tax_ni(gross, current_sacrifice, tax_region, ni_cap)
+    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region, ni_cap)
 
     take_home_reduction = current["take_home"] - proposed["take_home"]
     pension_increase = proposed_sacrifice - current_sacrifice
     employer_ni_saving = current["employer_ni"] - proposed["employer_ni"]
 
     return jsonify({
+        "rules": {"ni_cap_2029": apply_cap, "ni_cap": SALARY_SACRIFICE_NI_CAP},
         "current": {
             **current,
             "pension_contrib": round(current_sacrifice),
@@ -85,9 +92,12 @@ def bonus_optimiser_calc():
     sacrifice_amount = bonus * (sacrifice_pct / 100)
     bonus_kept = bonus - sacrifice_amount
 
+    apply_cap = bool(data.get("apply_2029_ni_cap", False))
+    ni_cap = SALARY_SACRIFICE_NI_CAP if apply_cap else None
+
     baseline = calc_tax_ni(gross, 0, tax_region)
     cash = calc_tax_ni(gross + bonus, 0, tax_region)
-    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region)
+    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region, ni_cap)
 
     cash_extra_take_home = cash["take_home"] - baseline["take_home"]
     sacrifice_extra_take_home = sacrifice["take_home"] - baseline["take_home"]
@@ -98,6 +108,7 @@ def bonus_optimiser_calc():
     marginal_rate = (cash_tax_ni_paid / bonus * 100) if bonus > 0 else 0
 
     return jsonify({
+        "rules": {"ni_cap_2029": apply_cap, "ni_cap": SALARY_SACRIFICE_NI_CAP},
         "inputs": {
             "gross_salary": gross,
             "bonus": bonus,
@@ -132,12 +143,21 @@ def bonus_optimiser_calc():
 @tools_bp.route("/iht-estimator", methods=["POST"])
 @require_auth
 def iht_estimator():
-    """Estimate IHT due on an estate. Current-year allowances from uk_tax (NRB/RNRB frozen to April 2031)."""
+    """Estimate IHT due on an estate. Current-year allowances from uk_tax (NRB/RNRB frozen to April 2031).
+    With include_pensions, pension_value is added to the estate (rules from 6 April 2027)."""
     data = json_body()
     estate = max(0, float(as_number(data.get("estate_value"), "estate_value", 0)))
     married = bool(data.get("married", False))
     has_residence = bool(data.get("has_residence", True))
     charity = max(0, float(as_number(data.get("charitable_bequest"), "charitable_bequest", 0)))
+    # From 6 April 2027 unused pension pots count as part of the estate.
+    # `estate_value` is everything else; the pots are added only when the
+    # caller asks for the 2027 rules.
+    include_pensions = bool(data.get("include_pensions", False))
+    pension_value = max(0, float(as_number(data.get("pension_value"), "pension_value", 0)))
+    estate_ex_pensions = estate
+    if include_pensions:
+        estate += pension_value
     charity = min(charity, estate)
 
     nrb = IHT_NRB * (2 if married else 1)
@@ -167,6 +187,9 @@ def iht_estimator():
     return jsonify({
         "inputs": {
             "estate_value": round(estate),
+            "estate_ex_pensions": round(estate_ex_pensions),
+            "pension_value": round(pension_value),
+            "include_pensions": include_pensions,
             "married": married,
             "has_residence": has_residence,
             "charitable_bequest": round(charity),

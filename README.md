@@ -60,7 +60,7 @@ Light theme is a click away:
 ### Retirement & Projections
 - Compound growth modelling with real returns (adjustable nominal growth rate and inflation)
 - **Forecast fan chart** — ±1σ envelope around the central projection (lognormal model, 15% equity-like volatility) so the range of outcomes is visible at a glance
-- Drawdown simulator: project how long your pot lasts in retirement, with adjustable retirement age, spending, and State Pension inputs
+- Drawdown simulator: separate pension and ISA pots, income tax on pension withdrawals (25% tax-free), the pension access age for early retirees, and a Monte Carlo run giving the chance your money lasts to 95
 - Defined Benefit pension income shown separately and factored into drawdown projections
 
 ### FIRE Calculator
@@ -72,7 +72,7 @@ Light theme is a click away:
 ### Financial Advisor
 Rule-based insights engine — a pure function over your accounts, profile and snapshots, so every
 recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
-- ISA allowance usage and days remaining in the tax year
+- ISA allowance usage and days remaining in the tax year — from the amount you record as paid in so far, or estimated from monthly contributions
 - **LISA bonus headroom** — flags missed 25% government bonus when under 50
 - **CGT allowance** — bed-and-ISA prompt when GIA unrealised gains exceed £3k
 - Pension headroom vs annual allowance
@@ -83,7 +83,7 @@ recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
 - Salary sacrifice optimisation (with Scottish / rUK tax band awareness)
 - **Salary band cliff alerts** — actionable warnings just above higher-rate and additional-rate thresholds
 - Debt prioritisation (high-interest first)
-- Emergency fund adequacy
+- Emergency fund adequacy (against your own monthly spending figure if you enter one)
 - **Fixed-savings maturity reminder** — heads-up before fixed-rate bonds roll over to dismal rates
 - Mortgage alerts and overpayment opportunity
 - **Variable mortgage drift vs BoE** — flags tracker/SVR rates running materially above market margin
@@ -100,10 +100,10 @@ recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
   - Days remaining in the current tax year
 
 ### Tools
-- **Salary Sacrifice Calculator** — Scottish and rUK income tax bands, NI savings, effective cost, employer NI saving, take-home impact
+- **Salary Sacrifice Calculator** — Scottish and rUK income tax bands (including the £100k Personal Allowance taper), NI savings, effective cost, employer NI saving, take-home impact; optional April 2029 rules (NI relief capped at the first £2,000 sacrificed)
 - **Bonus Optimiser** — Model a one-off lump sum (annual bonus, RSU vest) as cash vs sacrifice-to-pension; shows marginal rate, take-home impact, and total value gained. Warns when the bonus pushes you into the PA taper or additional-rate band
 - **Marginal Rate Curve** — plots your effective marginal tax + NI rate across £0–£200k, making the 60% PA-taper zone and HICBC ramp visible, with markers at your current and after-sacrifice salary
-- **IHT Estimator** — Inheritance tax calculator using 2026/27 allowances. NRB + RNRB taper (>£2M), transferable allowances for married couples, reduced 36% rate for 10%+ charitable bequests
+- **IHT Estimator** — Inheritance tax calculator using 2026/27 allowances. NRB + RNRB taper (>£2M), transferable allowances for married couples, reduced 36% rate for 10%+ charitable bequests; unused pension pots counted under the April 2027 rules (switchable)
 - **Debt Payoff Planner** — Avalanche vs snowball comparison with total interest saved
 - **Mortgage Scenarios** — Model different rates, terms, and overpayment strategies
 - **Carry-Forward Pension Calculator** — Auto-rolls to the current tax year using a built-in pension annual-allowance history (2014/15 onwards). Editable prior-year inputs persist locally per tax year; calculates unused allowance, total carry-forward headroom, and monthly contribution needed to fully utilise it this year
@@ -121,6 +121,7 @@ recommendation is auditable in `frontend/src/advisor.js`. Rules cover:
 ### Theme
 - Dark theme (default) and light theme, toggled in the header and persisted in `localStorage`
 - **Keyboard shortcuts** — vim-style `g`-prefix navigation (`g s` snapshot, `g u` update balances, `g a` advisor, …); press `?` for the cheatsheet
+- **Linkable tabs** — the active tab and tool live in the URL (`#/projections`, `#/tools/fire`), so refresh, back/forward and bookmarks work
 
 ### Data & Auth
 - Full JSON export and import for backup/migration

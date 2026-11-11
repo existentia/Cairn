@@ -55,3 +55,13 @@ test("LISA contributions count toward the overall ISA allowance", () => {
   // £15,996 of £20,000 used → £4,004 left
   assert.ok(titles(base({}, accounts)).includes("ISA Allowance Nearly Maxed"));
 });
+
+test("emergency fund uses entered monthly spending, and says when it is estimating", () => {
+  const cash = [{ type: "SAVINGS", name: "Example Saver", balance: 6000, interest_rate: 4 }];
+  // Entered: £1,500/month → 4 months of cover, within range.
+  const entered = generateInsights(base({ monthly_spending: 1500 }, cash));
+  assert.ok(entered.some((i) => i.title === "Emergency Fund Adequate"));
+  // Not entered: estimated at 65% of £60k = £3,250/month → under 3 months.
+  const guessed = generateInsights(base({}, cash)).find((i) => i.title === "Emergency Fund Below Target");
+  assert.match(guessed.detail, /estimated from your salary/);
+});

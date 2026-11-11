@@ -147,6 +147,15 @@ MIGRATIONS = [
     ("015_roll_tax_year_2026_27", _m_roll_tax_year_2026_27),
     ("016_create_ai_commentary", _m_create_ai_commentary),
     ("017_create_boe_rate_cache", _m_create_boe_rate_cache),
+    # Monthly spending (0 = not entered; tools fall back to an estimate).
+    ("018_profile_add_monthly_spending",
+     _alter_add_column("profile", "monthly_spending REAL NOT NULL DEFAULT 0")),
+    # Amount actually paid into an ISA/SIPP so far in `ytd_tax_year`. Only
+    # trusted while ytd_tax_year matches the current tax year.
+    ("019_accounts_add_ytd_contrib",
+     _alter_add_column("accounts", "ytd_contrib REAL NOT NULL DEFAULT 0")),
+    ("020_accounts_add_ytd_tax_year",
+     _alter_add_column("accounts", "ytd_tax_year TEXT NOT NULL DEFAULT ''")),
 ]
 
 

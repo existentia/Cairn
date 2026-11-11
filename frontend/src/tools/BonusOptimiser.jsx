@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { T, Field, Btn } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { api } from "../api.js";
-import { TAX_YEAR_LABEL } from "../constants.js";
+import { TAX_YEAR_LABEL, SALARY_SACRIFICE_NI_CAP } from "../constants.js";
 
 export default function BonusOptimiser({ profile, settings }) {
   const [gross, setGross] = useState(profile.gross_salary || 50000);
   const [bonus, setBonus] = useState(10000);
   const [sacrificePct, setSacrificePct] = useState(50);
   const [taxRegion, setTaxRegion] = useState(settings?.tax_region || "scotland");
+  const [ni2029, setNi2029] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -20,6 +21,7 @@ export default function BonusOptimiser({ profile, settings }) {
         bonus,
         sacrifice_pct: sacrificePct,
         tax_region: taxRegion,
+        apply_2029_ni_cap: ni2029,
       });
       setResult(res);
     } catch (e) {
@@ -28,7 +30,7 @@ export default function BonusOptimiser({ profile, settings }) {
     setLoading(false);
   };
 
-  useEffect(() => { calculate(); }, []);
+  useEffect(() => { calculate(); }, [ni2029]);
 
   const regionLabel = taxRegion === "scotland" ? `Scotland (${TAX_YEAR_LABEL})` : `England / Wales / NI (${TAX_YEAR_LABEL})`;
 
@@ -61,6 +63,13 @@ export default function BonusOptimiser({ profile, settings }) {
           <Field label="Bonus / Lump Sum" type="number" value={bonus} onChange={setBonus} prefix="£" />
           <Field label="% Sacrificed to Pension" type="number" value={sacrificePct} onChange={(v) => setSacrificePct(Math.max(0, Math.min(100, v)))} suffix="%" small />
         </div>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: T.textMuted, marginBottom: 14, cursor: "pointer", lineHeight: 1.5 }}>
+          <input type="checkbox" checked={ni2029} onChange={(e) => setNi2029(e.target.checked)} style={{ accentColor: T.accent, marginTop: 2 }} />
+          <span>
+            Apply the April 2029 rules: NI relief only on the first £{SALARY_SACRIFICE_NI_CAP.toLocaleString()} sacrificed each year.
+            {ni2029 && <span style={{ color: T.textDim }}> Income tax relief is unchanged; employee and employer NI are charged on anything sacrificed above the cap.</span>}
+          </span>
+        </label>
         <Btn onClick={calculate}>{loading ? "Calculating..." : "Recalculate"}</Btn>
 
         {/* Context warnings about which bands you fall into */}

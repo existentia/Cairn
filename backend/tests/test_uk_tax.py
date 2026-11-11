@@ -62,6 +62,27 @@ class PersonalAllowanceTaper(unittest.TestCase):
         self.assertAlmostEqual(r["take_home"], 57_000 - r["income_tax"] - r["employee_ni"], delta=1)
 
 
+class SalarySacrificeNiCap(unittest.TestCase):
+    """April 2029 rules: only the first £2,000 sacrificed escapes NI."""
+
+    def test_income_tax_relief_is_unchanged(self):
+        today = calc_tax_ni(60_000, 6_000, "ruk")
+        capped = calc_tax_ni(60_000, 6_000, "ruk", ni_cap=uk_tax.SALARY_SACRIFICE_NI_CAP)
+        self.assertEqual(today["income_tax"], capped["income_tax"])
+
+    def test_ni_is_charged_above_the_cap(self):
+        today = calc_tax_ni(60_000, 6_000, "ruk")
+        capped = calc_tax_ni(60_000, 6_000, "ruk", ni_cap=2_000)
+        # £4,000 more NI-able pay, all above the upper earnings limit: 2%.
+        self.assertEqual(capped["employee_ni"] - today["employee_ni"], 80)
+        self.assertEqual(capped["employer_ni"] - today["employer_ni"], 600)   # 15%
+        self.assertEqual(today["take_home"] - capped["take_home"], 80)
+
+    def test_sacrifice_within_the_cap_is_unaffected(self):
+        self.assertEqual(calc_tax_ni(40_000, 1_500, "scotland"),
+                         calc_tax_ni(40_000, 1_500, "scotland", ni_cap=2_000))
+
+
 class StatePensionAge(unittest.TestCase):
     def test_by_date_of_birth(self):
         self.assertEqual(state_pension_age("1955-06-01"), 66)

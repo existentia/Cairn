@@ -26,6 +26,7 @@ import {
   SCOTLAND_BANDS, RUK_BANDS,
   personalAllowance, calcIncomeTax, calcEmployeeNi,
   daysUntilTaxYearEnd, TAX_YEAR_LABEL,
+  sumTaxYearContributions, monthsLeftInTaxYear,
 } from "./constants.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -66,13 +67,17 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   const isaMonthly = accounts
     .filter((a) => ISA_TYPES.has(a.type)) // LISA counts toward the overall allowance
     .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-  const isaAnnual = isaMonthly * 12;
+  // This tax year's subscriptions: amounts recorded as paid in so far plus
+  // regular contributions for the months left, or monthly × 12 if nothing
+  // has been recorded.
+  const isaYear = sumTaxYearContributions(accounts.filter((a) => ISA_TYPES.has(a.type)));
+  const isaAnnual = isaYear.projected;
   const isaRemaining = settings.isa_allowance - isaAnnual;
 
   if (isaRemaining > 5000) {
     insights.push({
       type: "opportunity", category: "isa", title: "ISA Allowance Headroom",
-      detail: `You're using ${fmtFull(isaAnnual)} of your ${fmtFull(settings.isa_allowance)} ISA allowance. That leaves ${fmtFull(isaRemaining)} of tax-free space. Increasing monthly contributions by ${fmtFull(Math.round(isaRemaining / 12))} would max it out.`,
+      detail: `You're ${isaYear.anyActual ? "on course to use" : "using"} ${fmtFull(isaAnnual)} of your ${fmtFull(settings.isa_allowance)} ISA allowance${isaYear.anyActual ? ` (${fmtFull(isaYear.paid)} paid in so far)` : ""}. That leaves ${fmtFull(isaRemaining)} of tax-free space. Increasing monthly contributions by ${fmtFull(Math.round(isaRemaining / (isaYear.anyActual ? Math.max(1, monthsLeftInTaxYear()) : 12)))} would max it out.`,
       priority: 2,
     });
   } else if (isaRemaining > 0 && isaRemaining <= 5000) {
@@ -97,8 +102,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // guaranteed return available to UK savers under 50.
   const lisaAccounts = accounts.filter((a) => a.type === "ISA_LISA");
   const hasLISA = lisaAccounts.length > 0;
-  const lisaMonthly = lisaAccounts.reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-  const lisaAnnual = lisaMonthly * 12;
+  const lisaAnnual = sumTaxYearContributions(lisaAccounts).projected;
   const lisaRemaining = LISA_ANNUAL_ALLOWANCE - lisaAnnual;
 
   if (hasLISA && age < LISA_CONTRIB_MAX_AGE && lisaRemaining > 500) {
@@ -171,13 +175,19 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
 
   // ── Emergency fund ───────────────────────────────────────────────
   const liquidCash = accounts.filter((a) => a.type === "CURRENT" || a.type === "SAVINGS").reduce((s, a) => s + a.balance, 0);
-  const monthlyExpenses = profile.gross_salary > 0 ? (profile.gross_salary * 0.65) / 12 : 2500;
+  // Use the user's own spending figure when they've entered one; otherwise
+  // fall back to a rough 65%-of-gross guess and say so.
+  const spendingEntered = (profile.monthly_spending || 0) > 0;
+  const monthlyExpenses = spendingEntered
+    ? profile.monthly_spending
+    : profile.gross_salary > 0 ? (profile.gross_salary * 0.65) / 12 : 2500;
+  const spendingNote = spendingEntered ? "" : " Based on spending estimated from your salary — enter your monthly spending in Settings for a truer figure.";
   const monthsCover = liquidCash / monthlyExpenses;
 
   if (monthsCover < 3) {
     insights.push({
       type: "warning", category: "savings", title: "Emergency Fund Below Target",
-      detail: `Liquid cash (${fmtFull(liquidCash)}) covers ~${monthsCover.toFixed(1)} months. Target: 3-6 months (${fmtFull(Math.round(monthlyExpenses * 3))} – ${fmtFull(Math.round(monthlyExpenses * 6))}). Consider pausing ISA contributions until this is built up.`,
+      detail: `Liquid cash (${fmtFull(liquidCash)}) covers ~${monthsCover.toFixed(1)} months. Target: 3-6 months (${fmtFull(Math.round(monthlyExpenses * 3))} – ${fmtFull(Math.round(monthlyExpenses * 6))}). Consider pausing ISA contributions until this is built up.${spendingNote}`,
       priority: 1,
     });
   } else if (monthsCover >= 3 && monthsCover < 6) {
@@ -185,7 +195,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   } else if (monthsCover >= 12) {
     insights.push({
       type: "opportunity", category: "savings", title: "Excess Cash Holdings",
-      detail: `${fmtFull(liquidCash)} covers ${monthsCover.toFixed(0)} months — well beyond the 6-month target. The excess ${fmtFull(Math.round(liquidCash - monthlyExpenses * 6))} could work harder in an ISA or pension.`,
+      detail: `${fmtFull(liquidCash)} covers ${monthsCover.toFixed(0)} months — well beyond the 6-month target. The excess ${fmtFull(Math.round(liquidCash - monthlyExpenses * 6))} could work harder in an ISA or pension.${spendingNote}`,
       priority: 3,
     });
   }
@@ -240,12 +250,17 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   const dcMonthlyContribs = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
   const sippMonthlyContribsGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
   const pensionAnnual = workplacePensionAnnual + (dcMonthlyContribs + sippMonthlyContribsGross) * 12;
-  const pensionHeadroom = settings.pension_annual_allowance - pensionAnnual;
+  // Annual Allowance use this tax year: as above, but SIPP payments use the
+  // recorded "paid in so far" figure where there is one. (pensionAnnual stays
+  // the steady-state rate, which is what the projections need.)
+  const sippYearGross = sumTaxYearContributions(accounts.filter((a) => a.type === "SIPP")).projected / 0.8;
+  const pensionThisYear = workplacePensionAnnual + dcMonthlyContribs * 12 + sippYearGross;
+  const pensionHeadroom = settings.pension_annual_allowance - pensionThisYear;
 
   if (pensionHeadroom > 20000) {
     insights.push({
       type: "info", category: "pension", title: "Pension Contribution Headroom",
-      detail: `Total contributions ~${fmtFull(Math.round(pensionAnnual))}/year against ${fmtFull(settings.pension_annual_allowance)} allowance. ${fmtFull(Math.round(pensionHeadroom))} headroom remaining. Salary sacrifice above the higher-rate threshold saves both Income Tax and NI. You can also carry forward unused allowance from the previous 3 tax years.`,
+      detail: `Total contributions ~${fmtFull(Math.round(pensionThisYear))} this tax year against ${fmtFull(settings.pension_annual_allowance)} allowance. ${fmtFull(Math.round(pensionHeadroom))} headroom remaining. Salary sacrifice above the higher-rate threshold saves both Income Tax and NI. You can also carry forward unused allowance from the previous 3 tax years.`,
       priority: 3,
     });
   }
@@ -570,7 +585,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // ── Overall savings rate ─────────────────────────────────────────
   if (profile.gross_salary > 0) {
     const savingsMonthly = accounts.filter((a) => a.type === "SAVINGS").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-    const totalAnnualSavings = pensionAnnual + isaAnnual + savingsMonthly * 12;
+    const totalAnnualSavings = pensionAnnual + isaMonthly * 12 + savingsMonthly * 12;
     const savingsRate = (totalAnnualSavings / profile.gross_salary) * 100;
 
     if (savingsRate < 10) {

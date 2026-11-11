@@ -91,6 +91,34 @@ class ApiTests(unittest.TestCase):
         ok = self.post("/api/tools/debt-payoff", {"debts": [{"name": "Card", "balance": 2000, "rate": 20, "min_payment": 100}]})
         self.assertEqual(ok.status_code, 200)
 
+    def test_salary_sacrifice_2029_ni_cap_toggle(self):
+        body = {"gross_salary": 60000, "current_contrib_pct": 0, "proposed_contrib_pct": 10, "tax_region": "ruk"}
+        today = self.post("/api/tools/salary-sacrifice", body).get_json()
+        capped = self.post("/api/tools/salary-sacrifice", {**body, "apply_2029_ni_cap": True}).get_json()
+        self.assertFalse(today["rules"]["ni_cap_2029"])
+        self.assertTrue(capped["rules"]["ni_cap_2029"])
+        self.assertEqual(capped["proposed"]["income_tax"], today["proposed"]["income_tax"])
+        self.assertEqual(capped["proposed"]["employee_ni"] - today["proposed"]["employee_ni"], 80)
+
+    def test_iht_pensions_only_count_under_2027_rules(self):
+        body = {"estate_value": 600000, "pension_value": 400000, "married": False, "has_residence": False}
+        before = self.post("/api/tools/iht-estimator", body).get_json()
+        after = self.post("/api/tools/iht-estimator", {**body, "include_pensions": True}).get_json()
+        self.assertEqual(before["calculation"]["iht_due"], 110000)   # (600k − 325k) × 40%
+        self.assertEqual(after["calculation"]["iht_due"], 270000)    # (1m − 325k) × 40%
+        self.assertEqual(after["inputs"]["estate_ex_pensions"], 600000)
+        self.assertEqual(after["inputs"]["estate_value"], 1000000)
+
+    def test_new_profile_and_account_fields_round_trip(self):
+        self.client.put("/api/profile", json={"monthly_spending": 2400}, headers=self.auth)
+        self.assertEqual(self.client.get("/api/profile", headers=self.auth).get_json()["monthly_spending"], 2400)
+        acct = self.post("/api/accounts", {"name": "Example ISA", "type": "ISA_SS", "balance": 100,
+                                           "ytd_contrib": 9000, "ytd_tax_year": "2026/27"}).get_json()["id"]
+        row = next(a for a in self.client.get("/api/accounts", headers=self.auth).get_json() if a["id"] == acct)
+        self.assertEqual((row["ytd_contrib"], row["ytd_tax_year"]), (9000, "2026/27"))
+        self.client.delete(f"/api/accounts/{acct}", headers=self.auth)
+        self.client.put("/api/profile", json={"monthly_spending": 0}, headers=self.auth)
+
     # ── partial updates ──────────────────────────────────────────────
     def test_profile_and_settings_updates_are_partial(self):
         put = lambda path, body: self.client.put(path, json=body, headers=self.auth)

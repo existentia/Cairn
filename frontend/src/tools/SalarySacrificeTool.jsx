@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { T, Field, Btn } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import { api } from "../api.js";
-import { TAX_YEAR_LABEL } from "../constants.js";
+import { TAX_YEAR_LABEL, SALARY_SACRIFICE_NI_CAP } from "../constants.js";
 
 export default function SalarySacrificeTool({ profile, settings }) {
   const [currentPct, setCurrentPct] = useState(profile.pension_contrib_pct || 5);
@@ -10,6 +10,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
   const [employerPct, setEmployerPct] = useState(profile.employer_contrib_pct || 3);
   const [gross, setGross] = useState(profile.gross_salary || 50000);
   const [taxRegion, setTaxRegion] = useState(settings?.tax_region || "scotland");
+  const [ni2029, setNi2029] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,6 +23,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
         proposed_contrib_pct: proposedPct,
         employer_contrib_pct: employerPct,
         tax_region: taxRegion,
+        apply_2029_ni_cap: ni2029,
       });
       setResult(res);
     } catch (e) {
@@ -30,7 +32,7 @@ export default function SalarySacrificeTool({ profile, settings }) {
     setLoading(false);
   };
 
-  useEffect(() => { calculate(); }, []);
+  useEffect(() => { calculate(); }, [ni2029]);
 
   const regionLabel = taxRegion === "scotland" ? `Scotland (${TAX_YEAR_LABEL})` : `England / Wales / NI (${TAX_YEAR_LABEL})`;
 
@@ -65,6 +67,13 @@ export default function SalarySacrificeTool({ profile, settings }) {
           <Field label="Proposed Contrib %" type="number" value={proposedPct} onChange={setProposedPct} suffix="%" small />
           <Field label="Employer %" type="number" value={employerPct} onChange={setEmployerPct} suffix="%" small />
         </div>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: T.textMuted, marginBottom: 14, cursor: "pointer", lineHeight: 1.5 }}>
+          <input type="checkbox" checked={ni2029} onChange={(e) => setNi2029(e.target.checked)} style={{ accentColor: T.accent, marginTop: 2 }} />
+          <span>
+            Apply the April 2029 rules: NI relief only on the first £{SALARY_SACRIFICE_NI_CAP.toLocaleString()} sacrificed each year.
+            {ni2029 && <span style={{ color: T.textDim }}> Income tax relief is unchanged; employee and employer NI are charged on anything sacrificed above the cap.</span>}
+          </span>
+        </label>
         <Btn onClick={calculate}>{loading ? "Calculating..." : "Calculate"}</Btn>
       </div>
 
