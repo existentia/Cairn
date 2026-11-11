@@ -118,8 +118,52 @@ export const PENSION_AA_HISTORY = {
 
 // Ages
 export const PENSION_ACCESS_AGE = 57; // From April 2028
-export const STATE_PENSION_AGE = 67;
+export const STATE_PENSION_AGE = 67; // Fallback when no date of birth is known — prefer statePensionAge(dob)
 export const STATE_PENSION_ANNUAL_DEFAULT = 12548; // Full new State Pension 2026/27: £241.30/week
+
+// Legislated State Pension age (whole years) for an ISO date of birth.
+// 66 if born before 6 April 1960, 67 up to 5 April 1977, 68 from 6 April 1978.
+// The two phased cohorts (born 6 Apr 1960 – 5 Mar 1961 and 6 Apr 1977 –
+// 5 Apr 1978) are rounded up to the next whole year, erring on the cautious
+// side. ISO dates compare correctly as strings. Mirror of state_pension_age()
+// in uk_tax.py.
+export function statePensionAge(dob) {
+  if (typeof dob !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return STATE_PENSION_AGE;
+  if (dob < "1960-04-06") return 66;
+  if (dob < "1977-04-06") return 67;
+  return 68;
+}
+
+// Personal Allowance after the taper: £1 lost per £2 of income over £100k.
+export function personalAllowance(income) {
+  return Math.max(0, PERSONAL_ALLOWANCE - Math.max(0, income - PERSONAL_ALLOWANCE_TAPER_START) / 2);
+}
+
+// Income tax on `income` (after any salary sacrifice) for a band table.
+// Band upper bounds are gross income assuming the full PA; in law the lower
+// thresholds are amounts of *taxable* income (bound - PA) while the top-rate
+// threshold is £125,140 of taxable income outright. Mirror of
+// calc_income_tax() in uk_tax.py.
+export function calcIncomeTax(income, bands) {
+  const taxable = Math.max(0, income - personalAllowance(income));
+  let tax = 0;
+  let prev = 0;
+  for (const [limit, rate] of bands) {
+    const upper = limit < PERSONAL_ALLOWANCE_TAPER_END ? limit - PERSONAL_ALLOWANCE : limit;
+    if (taxable <= prev) break;
+    tax += (Math.min(taxable, upper) - prev) * rate;
+    prev = upper;
+  }
+  return tax;
+}
+
+// Employee Class 1 NI on `income` (after any salary sacrifice): main rate
+// between the primary threshold and the upper earnings limit, 2% above.
+export function calcEmployeeNi(income) {
+  if (income <= NI_PRIMARY_THRESHOLD) return 0;
+  return (Math.min(income, NI_UPPER_EARNINGS_LIMIT) - NI_PRIMARY_THRESHOLD) * NI_RATE_MAIN
+    + Math.max(0, income - NI_UPPER_EARNINGS_LIMIT) * NI_RATE_UEL_PLUS;
+}
 
 // Tax-year helpers
 const TAX_YEAR_RE = /^(\d{4})\/(\d{2})$/;

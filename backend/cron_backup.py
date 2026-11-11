@@ -5,8 +5,9 @@ Uses SQLite's online .backup() API so the DB doesn't need to be locked /
 quiesced; safe to run while the web server is serving requests.
 
 Configurable via environment:
-  BACKUP_DIR          Where to write backups (default /app/data/backups,
-                      so they land inside the bind-mounted data volume).
+  DATA_DIR            Where cairn.db lives (default <project>/data).
+  BACKUP_DIR          Where to write backups (default <DATA_DIR>/backups,
+                      so they land inside the data volume).
   BACKUP_RETAIN_DAYS  Number of recent backups to keep (default 14).
 
 Files are named cairn-YYYYMMDD-HHMMSS.db. Anything older than the retain
@@ -22,8 +23,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path("/app/data/cairn.db")
-DEFAULT_DIR = Path("/app/data/backups")
+# Same resolution as db_auth.py, so DATA_DIR is honoured here too.
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
+DB_PATH = DATA_DIR / "cairn.db"
+DEFAULT_DIR = DATA_DIR / "backups"
 
 
 def main():

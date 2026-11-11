@@ -265,6 +265,7 @@ export default function App() {
   const [authed, setAuthed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState("overview");
   const [editId, setEditId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -339,6 +340,7 @@ export default function App() {
     try {
       const d = await api.getDashboard();
       setData(d);
+      setLoadError(null);
       // Lazy-fetch BoE rate in the background if dashboard didn't carry one
       // (cache cold). Once it returns we merge into data so the mortgage-drift
       // advisor rule starts firing without needing a manual refresh.
@@ -349,6 +351,9 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to load data", e);
+      // Only matters when there's nothing to show yet; after a failed
+      // refresh the last good data stays on screen.
+      setLoadError(e?.message || "Request failed");
     }
   };
 
@@ -543,6 +548,16 @@ export default function App() {
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading...</div>;
   if (!authed) return <><style>{makeGlobalStyles()}</style><LoginScreen onLogin={handleLogin} /></>;
+  if (!data && loadError) return (
+    <>
+      <style>{makeGlobalStyles()}</style>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 20, textAlign: "center" }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Couldn't load your data</div>
+        <div style={{ fontSize: 12, color: T.textMuted, maxWidth: 360 }}>The Cairn server didn't return the dashboard ({loadError}). Check the container is running, then try again.</div>
+        <Btn onClick={() => { setLoadError(null); loadData(); }} style={{ marginTop: 6 }}>Try again</Btn>
+      </div>
+    </>
+  );
   if (!data) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading data...</div>;
 
   const { profile, accounts, settings, snapshots, goals = [] } = data;

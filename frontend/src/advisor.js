@@ -13,8 +13,7 @@ import {
   PERSONAL_ALLOWANCE_TAPER_START, PERSONAL_ALLOWANCE_TAPER_END,
   SCOTLAND_HIGHER_RATE_THRESHOLD, RUK_HIGHER_RATE_THRESHOLD,
   SCOTLAND_HIGHER_RATE_PCT, RUK_HIGHER_RATE_PCT,
-  NI_RATE_MAIN,
-  STATE_PENSION_AGE, PENSION_ACCESS_AGE, STATE_PENSION_ANNUAL_DEFAULT,
+  statePensionAge, PENSION_ACCESS_AGE, STATE_PENSION_ANNUAL_DEFAULT,
   AA_TAPER_THRESHOLD_INCOME, AA_TAPER_ADJUSTED_INCOME, AA_TAPER_MIN_ALLOWANCE,
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT,
   LISA_OPEN_MAX_AGE, LISA_CONTRIB_MAX_AGE,
@@ -24,6 +23,8 @@ import {
   MARRIAGE_ALLOWANCE_TRANSFER, MARRIAGE_ALLOWANCE_SAVING,
   MARRIAGE_ALLOWANCE_SPOUSE_MAX,
   PERSONAL_ALLOWANCE,
+  SCOTLAND_BANDS, RUK_BANDS,
+  personalAllowance, calcIncomeTax, calcEmployeeNi,
   daysUntilTaxYearEnd, TAX_YEAR_LABEL,
 } from "./constants.js";
 
@@ -50,9 +51,20 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   const totalLiabilities = accounts.filter((a) => LIABILITY_TYPES.has(a.type)).reduce((s, a) => s + Math.abs(a.balance), 0);
   const netWorth = totalAssets - totalLiabilities;
 
+  // Income after workplace pension contributions. Those are treated as salary
+  // sacrifice (the same convention as workplacePensionAnnual below), so this —
+  // not the headline salary — is what the tax bands, the PA taper and the
+  // HICBC thresholds actually test.
+  const adjIncome = (profile.gross_salary || 0) * (1 - (profile.pension_contrib_pct || 0) / 100);
+  const taxBands = settings.tax_region === "scotland" ? SCOTLAND_BANDS : RUK_BANDS;
+  // Headline income tax rate (%) of the band an income falls in.
+  const bandRatePct = (income) => +(taxBands.find(([limit]) => income <= limit)[1] * 100).toFixed(1);
+  // Income tax (incl. PA taper) + employee NI at a given income.
+  const deductions = (income) => calcIncomeTax(income, taxBands) + calcEmployeeNi(income);
+
   // ── ISA allowance ────────────────────────────────────────────────
   const isaMonthly = accounts
-    .filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH")
+    .filter((a) => ISA_TYPES.has(a.type)) // LISA counts toward the overall allowance
     .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
   const isaAnnual = isaMonthly * 12;
   const isaRemaining = settings.isa_allowance - isaAnnual;
@@ -112,8 +124,8 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   const totalGiaGain = giaAccounts.reduce((s, a) => s + (a.unrealised_gain || 0), 0);
   if (totalGiaGain > CGT_ANNUAL_ALLOWANCE) {
     const rate = (settings.tax_region === "scotland"
-      ? profile.gross_salary > SCOTLAND_HIGHER_RATE_THRESHOLD
-      : profile.gross_salary > RUK_HIGHER_RATE_THRESHOLD)
+      ? adjIncome > SCOTLAND_HIGHER_RATE_THRESHOLD
+      : adjIncome > RUK_HIGHER_RATE_THRESHOLD)
       ? CGT_HIGHER_RATE_PCT : CGT_BASIC_RATE_PCT;
     const realisable = Math.min(totalGiaGain, CGT_ANNUAL_ALLOWANCE);
     insights.push({
@@ -241,16 +253,14 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // ── Salary sacrifice opportunity ─────────────────────────────────
   const taxRegion = settings.tax_region || "scotland";
   const higherRateThreshold = taxRegion === "scotland" ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
-  const higherRatePct = taxRegion === "scotland" ? SCOTLAND_HIGHER_RATE_PCT : RUK_HIGHER_RATE_PCT;
   const bandDesc = taxRegion === "scotland" ? `Scottish higher-rate band (${SCOTLAND_HIGHER_RATE_PCT}%)` : `higher-rate band (${RUK_HIGHER_RATE_PCT}%)`;
   if (profile.gross_salary > higherRateThreshold && profile.pension_contrib_pct < 15) {
     const currentSacrifice = profile.gross_salary * (profile.pension_contrib_pct / 100);
     const toThreshold = profile.gross_salary - higherRateThreshold - currentSacrifice;
     if (toThreshold > 0) {
       const extraContrib = Math.min(toThreshold, 20000);
-      // Combined saving: higher-rate income tax + employee NI within UEL
-      const combinedSavingRate = (higherRatePct / 100) + NI_RATE_MAIN;
-      const totalSaved = extraContrib * combinedSavingRate;
+      // Exact income tax + employee NI saved (NI is only 2% above the UEL)
+      const totalSaved = deductions(adjIncome) - deductions(adjIncome - extraContrib);
       const takeHomeReduction = extraContrib - totalSaved;
       insights.push({
         type: "opportunity", category: "pension", title: "Salary Sacrifice Optimisation",
@@ -261,12 +271,14 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   }
 
   // ── Personal allowance taper ─────────────────────────────────────
-  if (profile.gross_salary > PERSONAL_ALLOWANCE_TAPER_START) {
-    const taperAmount = Math.min(profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START, PERSONAL_ALLOWANCE_TAPER_END - PERSONAL_ALLOWANCE_TAPER_START);
-    const paLost = Math.round(taperAmount / 2);
+  if (adjIncome > PERSONAL_ALLOWANCE_TAPER_START) {
+    const paLost = Math.round(PERSONAL_ALLOWANCE - personalAllowance(adjIncome));
+    const taperRatePct = bandRatePct(PERSONAL_ALLOWANCE_TAPER_START + 1);
+    const sacrificeNeeded = adjIncome - PERSONAL_ALLOWANCE_TAPER_START;
+    const totalSaved = deductions(adjIncome) - deductions(PERSONAL_ALLOWANCE_TAPER_START);
     insights.push({
       type: "warning", category: "general", title: "Personal Allowance Taper",
-      detail: `Gross salary of ${fmtFull(profile.gross_salary)} triggers the PA taper — you lose £1 of personal allowance for every £2 over £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()}, creating a ~60% effective marginal rate. You've lost ~${fmtFull(paLost)} of your PA. Salary sacrificing down to £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()} would fully restore it and could be worth ${fmtFull(Math.round(paLost * (SCOTLAND_HIGHER_RATE_PCT / 100)))} in additional tax relief.`,
+      detail: `Income of ${fmtFull(Math.round(adjIncome))} after pension contributions triggers the PA taper — you lose £1 of personal allowance for every £2 over £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()}, creating a ~${taperRatePct * 1.5}% effective marginal income tax rate in that zone. You've lost ~${fmtFull(paLost)} of your PA. Sacrificing a further ${fmtFull(Math.round(sacrificeNeeded))} to bring income down to £${PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()} would fully restore it and save about ${fmtFull(Math.round(totalSaved))} in income tax and NI.`,
       priority: 1,
     });
   }
@@ -306,13 +318,13 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // threshold and restoring the full Child Benefit. Often the single most
   // valuable sal-sac case for parents.
   const childrenCount = profile.children_count || 0;
-  if (childrenCount > 0 && profile.gross_salary > HICBC_THRESHOLD_START) {
+  if (childrenCount > 0 && adjIncome > HICBC_THRESHOLD_START) {
     // Annual Child Benefit at current-year rates
     const cbAnnual = Math.round(
       CB_WEEKLY_FIRST_CHILD * 52
       + CB_WEEKLY_ADDITIONAL_CHILD * 52 * Math.max(0, childrenCount - 1)
     );
-    if (profile.gross_salary >= HICBC_THRESHOLD_END) {
+    if (adjIncome >= HICBC_THRESHOLD_END) {
       insights.push({
         type: "warning", category: "tax", title: "HICBC Fully Clawed Back",
         detail: `Income above £${HICBC_THRESHOLD_END.toLocaleString()} means 100% of your ~${fmtFull(cbAnnual)}/yr Child Benefit is reclaimed via the High Income Child Benefit Charge. Salary-sacrificing down toward £${HICBC_THRESHOLD_START.toLocaleString()} would restore the benefit pound-for-pound, often at a net cost (after tax + NI relief) of ~40-60% of the sacrifice amount.`,
@@ -320,13 +332,13 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
       });
     } else {
       // Partial taper — percentage clawed back
-      const excess = profile.gross_salary - HICBC_THRESHOLD_START;
+      const excess = adjIncome - HICBC_THRESHOLD_START;
       const taperPct = Math.min(100, Math.floor(excess / 200));
       const clawedBack = Math.round(cbAnnual * taperPct / 100);
       const sacrificeToZero = Math.round(excess);
       insights.push({
         type: "warning", category: "tax", title: `HICBC: ${taperPct}% of CB Lost`,
-        detail: `Income £${profile.gross_salary.toLocaleString()} triggers a partial HICBC — about ${fmtFull(clawedBack)} of your ${fmtFull(cbAnnual)}/yr Child Benefit is reclaimed. Salary-sacrificing ${fmtFull(sacrificeToZero)} into pension would drop you below £${HICBC_THRESHOLD_START.toLocaleString()} and restore the full benefit — effective relief often exceeds 60% once tax + NI + restored CB are combined.`,
+        detail: `Income of ${fmtFull(Math.round(adjIncome))} after pension contributions triggers a partial HICBC — about ${fmtFull(clawedBack)} of your ${fmtFull(cbAnnual)}/yr Child Benefit is reclaimed. Salary-sacrificing ${fmtFull(sacrificeToZero)} into pension would drop you below £${HICBC_THRESHOLD_START.toLocaleString()} and restore the full benefit — effective relief often exceeds 60% once tax + NI + restored CB are combined.`,
         priority: 1,
       });
     }
@@ -339,7 +351,7 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
     const isScot = settings.tax_region === "scotland";
     const basicCeiling = isScot ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
     // Only worth it if main earner is in the basic/intermediate band (not above higher-rate threshold)
-    if (profile.gross_salary > PERSONAL_ALLOWANCE && profile.gross_salary < basicCeiling) {
+    if (adjIncome > PERSONAL_ALLOWANCE && adjIncome < basicCeiling) {
       insights.push({
         type: "opportunity", category: "tax", title: "Marriage Allowance Available",
         detail: `Your spouse's income (${fmtFull(profile.spouse_income)}) is below the personal allowance, so they can transfer £${MARRIAGE_ALLOWANCE_TRANSFER.toLocaleString()} of unused PA to you — worth up to £${MARRIAGE_ALLOWANCE_SAVING}/year in tax saved. Apply once at gov.uk/marriage-allowance and it auto-renews each year. Can also be backdated up to 4 prior tax years if you've been eligible.`,
@@ -353,27 +365,26 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
   // is most valuable when it pulls you below one of these cliffs.
   const isScotland = settings.tax_region === "scotland";
   const higherCliff = isScotland ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
-  const additionalCliff = 125140; // Both regions: top rate / additional rate threshold
+  const additionalCliff = PERSONAL_ALLOWANCE_TAPER_END; // Both regions: top / additional rate threshold
 
   // Within £5k OVER the higher-rate cliff: a small sacrifice pulls you back below
-  if (profile.gross_salary > higherCliff && profile.gross_salary <= higherCliff + 5000) {
-    const sacrificeNeeded = profile.gross_salary - higherCliff;
+  if (adjIncome > higherCliff && adjIncome <= higherCliff + 5000) {
+    const sacrificeNeeded = adjIncome - higherCliff;
     const higherPct = isScotland ? SCOTLAND_HIGHER_RATE_PCT : RUK_HIGHER_RATE_PCT;
-    const basicPct = isScotland ? 21 : 20; // Scottish intermediate vs rUK basic
-    const savedPerPound = (higherPct - basicPct) / 100 + NI_RATE_MAIN;
+    const totalSaved = deductions(adjIncome) - deductions(higherCliff);
     insights.push({
       type: "opportunity", category: "tax", title: "Just Over the Higher-Rate Threshold",
-      detail: `Salary of ${fmtFull(profile.gross_salary)} sits just above the £${higherCliff.toLocaleString()} ${isScotland ? "Scottish higher" : "higher"}-rate threshold (${higherPct}%). A pension sacrifice of ${fmtFull(sacrificeNeeded)} would drop you back into the lower band, saving ${higherPct - basicPct}p + NI per £1 sacrificed — about ${fmtFull(Math.round(sacrificeNeeded * savedPerPound))}/year in tax relief. Plus the full amount lands in your pension.`,
+      detail: `Income of ${fmtFull(Math.round(adjIncome))} after pension contributions sits just above the £${higherCliff.toLocaleString()} ${isScotland ? "Scottish higher" : "higher"}-rate threshold (${higherPct}%). A further pension sacrifice of ${fmtFull(Math.round(sacrificeNeeded))} would take you out of that band entirely, saving ${higherPct}p of income tax plus NI on every £1 — about ${fmtFull(Math.round(totalSaved))}/year. Plus the full amount lands in your pension.`,
       priority: 2,
     });
   }
 
   // Above the additional-rate cliff: top marginal rate sal-sac is gold
-  if (profile.gross_salary > additionalCliff) {
-    const topPct = isScotland ? 48 : 45; // Scottish top vs rUK additional
+  if (adjIncome > additionalCliff) {
+    const topPct = bandRatePct(Infinity); // Scottish top vs rUK additional
     insights.push({
       type: "opportunity", category: "tax", title: "Additional-Rate Taxpayer",
-      detail: `Salary above £${additionalCliff.toLocaleString()} means you pay ${topPct}% marginal income tax on every £ over that. Each £1 of pension sacrifice saves ${topPct}p in income tax plus 2% NI — the highest effective relief available. Combined with the £100k Personal Allowance taper and £260k AA taper, very high earners benefit most from carry-forward + maxed pension contributions. Worth modelling in the Salary Sacrifice tool.`,
+      detail: `Income above £${additionalCliff.toLocaleString()} means you pay ${topPct}% marginal income tax on every £ over that. Each £1 of pension sacrifice saves ${topPct}p in income tax plus 2% NI — the highest effective relief available. Combined with the £100k Personal Allowance taper and £260k AA taper, very high earners benefit most from carry-forward + maxed pension contributions. Worth modelling in the Salary Sacrifice tool.`,
       priority: 2,
     });
   }
@@ -525,18 +536,19 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
 
     const dbAnnual = accounts.filter((a) => a.type === "PENSION_DB").reduce((s, a) => s + (a.db_annual_pension || 0), 0);
     const spAnnual = profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT;
+    const spAge = statePensionAge(profile.dob);
     const totalPot = projected + projectedISA;
     const potDrawdown = totalPot * 0.04;
     // Total guaranteed income once State Pension kicks in (and DB if any)
-    const guaranteedAt67 = spAnnual + dbAnnual;
-    const totalIncomeAt67 = potDrawdown + guaranteedAt67;
+    const guaranteedAtSpa = spAnnual + dbAnnual;
+    const totalIncomeAtSpa = potDrawdown + guaranteedAtSpa;
 
     const guarBreakdown = dbAnnual > 0
       ? `${fmtFull(Math.round(spAnnual))}/yr State Pension + ${fmtFull(Math.round(dbAnnual))}/yr DB pension`
       : `${fmtFull(Math.round(spAnnual))}/yr State Pension`;
-    const spNote = profile.retirement_age < STATE_PENSION_AGE
-      ? `From age ${STATE_PENSION_AGE}: pot drawdown plus ${guarBreakdown} = ~${fmtFull(Math.round(totalIncomeAt67))}/yr (${fmtFull(Math.round(totalIncomeAt67 / 12))}/mo).`
-      : `Plus ${guarBreakdown} from day one = ~${fmtFull(Math.round(totalIncomeAt67))}/yr (${fmtFull(Math.round(totalIncomeAt67 / 12))}/mo).`;
+    const spNote = profile.retirement_age < spAge
+      ? `From age ${spAge}: pot drawdown plus ${guarBreakdown} = ~${fmtFull(Math.round(totalIncomeAtSpa))}/yr (${fmtFull(Math.round(totalIncomeAtSpa / 12))}/mo).`
+      : `Plus ${guarBreakdown} from day one = ~${fmtFull(Math.round(totalIncomeAtSpa))}/yr (${fmtFull(Math.round(totalIncomeAtSpa / 12))}/mo).`;
 
     insights.push({
       type: "info", category: "retirement", title: "Retirement Projection",
@@ -544,12 +556,12 @@ export function generateInsights({ profile, accounts, settings, snapshots, boe_r
       priority: 2,
     });
 
-    if (profile.retirement_age < STATE_PENSION_AGE) {
-      const gapYears = STATE_PENSION_AGE - profile.retirement_age;
+    if (profile.retirement_age < spAge) {
+      const gapYears = spAge - profile.retirement_age;
       const bridgeNeeded = (spAnnual + dbAnnual) * gapYears;
       insights.push({
         type: "info", category: "retirement", title: "State Pension Gap",
-        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (${STATE_PENSION_AGE}). You'll need ~${fmtFull(Math.round(bridgeNeeded))} from your pot to bridge that gap. Factor this into drawdown planning — use the Drawdown Simulator in Projections.`,
+        detail: `Target retirement (${profile.retirement_age}) is ${gapYears} years before State Pension age (${spAge}). You'll need ~${fmtFull(Math.round(bridgeNeeded))} from your pot to bridge that gap. Factor this into drawdown planning — use the Drawdown Simulator in Projections.`,
         priority: 2,
       });
     }

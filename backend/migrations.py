@@ -100,6 +100,21 @@ def _m_create_ai_commentary(db):
     )
 
 
+def _m_create_boe_rate_cache(db):
+    """Single-row cache for the Bank of England base rate payload (see boe.py).
+    In SQLite rather than process memory so both gunicorn workers and the
+    dashboard call share it. Timestamps are epoch seconds."""
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS boe_rate_cache ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " payload TEXT NOT NULL,"
+        " is_fallback INTEGER NOT NULL DEFAULT 0,"
+        " fetched_at REAL NOT NULL DEFAULT 0,"
+        " last_attempt REAL NOT NULL DEFAULT 0"
+        ")"
+    )
+
+
 # Migrations are applied in list order. Names are permanent — they are
 # the key in `schema_migrations`. Don't rename or remove past entries.
 MIGRATIONS = [
@@ -131,6 +146,7 @@ MIGRATIONS = [
     ("014_backfill_investments_category", _m_backfill_investments_category),
     ("015_roll_tax_year_2026_27", _m_roll_tax_year_2026_27),
     ("016_create_ai_commentary", _m_create_ai_commentary),
+    ("017_create_boe_rate_cache", _m_create_boe_rate_cache),
 ]
 
 

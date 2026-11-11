@@ -6,8 +6,7 @@ import {
 import { T, fmt, ttStyle, ttLabelStyle } from "../ui.jsx";
 import { fmtFull } from "../advisor.js";
 import {
-  PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START,
-  SCOTLAND_BANDS, RUK_BANDS,
+  SCOTLAND_BANDS, RUK_BANDS, calcIncomeTax,
   NI_PRIMARY_THRESHOLD, NI_UPPER_EARNINGS_LIMIT, NI_RATE_MAIN, NI_RATE_UEL_PLUS,
   HICBC_THRESHOLD_START, HICBC_THRESHOLD_END,
   CB_WEEKLY_FIRST_CHILD, CB_WEEKLY_ADDITIONAL_CHILD,
@@ -19,25 +18,10 @@ import {
  * hide — it's what creates the infamous ~60% zone between £100k and £125k.
  */
 function totalDeductions(gross, bands, cbAnnual) {
-  // Tapered personal allowance: lose £1 per £2 over £100k
-  const pa = Math.max(0, PERSONAL_ALLOWANCE - Math.max(0, gross - PERSONAL_ALLOWANCE_TAPER_START) / 2);
-  const taxable = Math.max(0, gross - pa);
-
-  // Band tables give absolute upper bounds assuming the full PA, so convert
-  // each to a width in taxable-income space, then run `taxable` through them.
-  // (When the PA tapers, taxable grows 1.5× per £ of gross — taxed at the
-  // marginal band rate, which is exactly how the 60% zone arises.)
-  let tax = 0;
-  let remaining = taxable;
-  let prevTop = PERSONAL_ALLOWANCE;
-  for (const [upper, rate] of bands) {
-    const width = upper - prevTop;
-    const inBand = Math.min(remaining, width);
-    if (inBand <= 0) break;
-    tax += inBand * rate;
-    remaining -= inBand;
-    prevTop = upper;
-  }
+  // Shared helper — applies the tapered personal allowance (when the PA
+  // tapers, taxable income grows 1.5× per £ of gross, which is exactly how
+  // the 60% zone arises).
+  const tax = calcIncomeTax(gross, bands);
 
   // Employee NI — 8% between PT and UEL, 2% above
   let ni = 0;

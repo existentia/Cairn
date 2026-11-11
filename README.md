@@ -48,7 +48,7 @@ Light theme is a click away:
 - **Annual cashflow Sankey** — visualises where your salary goes (tax/NI → sacrifice → take-home → ISA/savings/mortgage/spending), live with Scottish / rUK tax bands
 - Net worth target line on the main chart
 - **Snapshot reminder banner** — nudges you when the last snapshot is over 35 days old
-- Automated monthly snapshot via cron job
+- Automated monthly snapshot via cron job (taken on the next start if the container was down on the 1st)
 
 ### Account Management
 - **Account types:** Current Account, Savings, Cash ISA, Stocks & Shares ISA, **Lifetime ISA** (with £4k sub-allowance + 25% bonus tracking), **General Investment Account (GIA)** with unrealised-gain tracking for CGT planning, DC/Workplace Pension, SIPP, Defined Benefit / Final Salary Pension (CETV + guaranteed annual income), Property, Mortgage, Credit Card, Loan, Other
@@ -174,7 +174,7 @@ you set above, then add your accounts and take a first snapshot.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `ADMIN_USERNAME` | yes | `admin` | Single-user login name |
-| `ADMIN_PASSWORD` | yes | `changeme` | Login password; hashed at rest. Changing it invalidates all sessions |
+| `ADMIN_PASSWORD` | yes | — | Login password; hashed at rest. Cairn refuses to start if it is unset or a placeholder (`changeme`, the `.env.example` value). Changing it invalidates all sessions |
 | `ANTHROPIC_API_KEY` | no | *(unset)* | Enables the AI Insights tab; returns 503 when unset |
 | `BACKUP_DIR` | no | `/app/data/backups` | Where the daily backup cron writes SQLite copies |
 | `BACKUP_RETAIN_DAYS` | no | `14` | How many daily backups to keep before rotating |
@@ -195,6 +195,8 @@ cairn/
 │   ├── uk_tax.py           # UK tax constants + calc helpers (2026/27)
 │   ├── snapshots.py        # Shared snapshot writer + idempotent backfill
 │   ├── migrations.py       # Named schema/data migrations
+│   ├── boe.py              # Bank of England base rate fetch, cache and fallback
+│   ├── tests/              # unittest suite (tax maths, BoE cache, snapshots, routes)
 │   ├── cron_snapshot.py    # Automated monthly snapshots
 │   ├── cron_backup.py      # Automated daily SQLite backups with rotation
 │   └── requirements.txt    # Flask + Anthropic SDK + Werkzeug + gunicorn
@@ -276,17 +278,22 @@ file writes a pre-import database backup first and rolls back atomically if anyt
 
 ```bash
 # Backend (Flask, port 8000)
-cd backend && pip install -r requirements.txt && FLASK_DEBUG=1 python app.py
+cd backend && pip install -r requirements.txt && ADMIN_PASSWORD=<your-dev-password> FLASK_DEBUG=1 python app.py
 
 # Frontend (Vite dev server, port 3000 — proxies /api → :8000)
 cd frontend && npm install && npm run dev
 
 # Production build of the SPA (output: frontend/dist/, served by Flask as static)
 cd frontend && npm run build
+
+# Tests for the tax maths (no extra dependencies)
+python -m unittest discover -s backend/tests
+cd frontend && npm test
 ```
 
-There is no test suite, linter, or type checker configured — this is a personal project kept
-deliberately dependency-light. Schema changes go through the named-migration framework in
+The tests cover the UK tax helpers and check that the Python and JS constants agree; there is
+no linter or type checker configured — this is a personal project kept deliberately
+dependency-light. Schema changes go through the named-migration framework in
 `backend/migrations.py`; append a new `(name, callable)` entry to `MIGRATIONS` rather than
 editing existing ones. `CLAUDE.md` documents the architecture in more depth, including the
 mirrored UK-tax constants in `backend/uk_tax.py` / `frontend/src/constants.js` that must be

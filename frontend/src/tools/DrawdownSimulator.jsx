@@ -4,10 +4,11 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { T, Field, fmt, ttStyle, ttItemStyle, ttLabelStyle } from "../ui.jsx";
-import { STATE_PENSION_ANNUAL_DEFAULT } from "../constants.js";
+import { STATE_PENSION_ANNUAL_DEFAULT, statePensionAge } from "../constants.js";
 import { fmtFull } from "../advisor.js";
 
 export default function DrawdownSimulator({ retirementPot, profile, settings, dbAnnualPension = 0 }) {
+  const spAge = statePensionAge(profile.dob);
   const spAnnual = (profile.state_pension_annual || STATE_PENSION_ANNUAL_DEFAULT) + dbAnnualPension;
   const realGrowth = Math.max(0, settings.growth_rate - settings.inflation_rate) / 100;
   const defaultMonthly = retirementPot > 0 ? Math.max(500, Math.round(retirementPot * 0.04 / 12)) : 2500;
@@ -19,13 +20,13 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
     let balance = retirementPot;
     const annualSpend = monthly * 12;
     for (let a = profile.retirement_age; a <= 100; a++) {
-      const sp = a >= 67 ? spAnnual : 0;
+      const sp = a >= spAge ? spAnnual : 0;
       pts.push({ age: a, balance: Math.max(0, Math.round(balance)) });
       if (balance <= 0) break;
       balance = balance * (1 + realGrowth) - Math.max(0, annualSpend - sp);
     }
     return pts;
-  }, [retirementPot, profile.retirement_age, spAnnual, realGrowth]);
+  }, [retirementPot, profile.retirement_age, spAnnual, spAge, realGrowth]);
 
   const mainData = useMemo(() => simulate(monthlySpend), [simulate, monthlySpend]);
   const depletes = mainData.find((p) => p.balance === 0);
@@ -47,7 +48,7 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
     });
   }, [simulate, monthlySpend]);
 
-  const spStartsAt = profile.retirement_age < 67 ? 67 : null;
+  const spStartsAt = profile.retirement_age < spAge ? spAge : null;
 
   if (retirementPot <= 0) {
     return (
@@ -62,7 +63,7 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
       <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 3px" }}>Drawdown Simulator</h3>
       <p style={{ fontSize: 10.5, color: T.textDim, margin: "0 0 16px" }}>
-        Pot balance from retirement (age {profile.retirement_age}) · Today's money · {fmtFull(spAnnual)}/yr guaranteed income at 67 reduces pot withdrawals{dbAnnualPension > 0 ? ` (SP + DB pension)` : ""}
+        Pot balance from retirement (age {profile.retirement_age}) · Today's money · {fmtFull(spAnnual)}/yr guaranteed income at {spAge} reduces pot withdrawals{dbAnnualPension > 0 ? ` (SP + DB pension)` : ""}
       </p>
 
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
@@ -107,9 +108,9 @@ export default function DrawdownSimulator({ retirementPot, profile, settings, db
           depletionAge
             ? { label: "Pot depletes at age", value: depletionAge, color: T.red, sub: `${depletionAge - profile.retirement_age} years of drawdown` }
             : { label: "Pot at age 100", value: fmtFull(lastBalance), color: T.green, sub: "Survives full retirement" },
-          { label: "Self-funded years (pre-SP)", value: spStartsAt ? `${67 - profile.retirement_age}y` : "N/A", color: T.amber, sub: `Ages ${profile.retirement_age}–67` },
+          { label: "Self-funded years (pre-SP)", value: spStartsAt ? `${spAge - profile.retirement_age}y` : "N/A", color: T.amber, sub: `Ages ${profile.retirement_age}–${spAge}` },
           { label: "Annual spend from pot (post-SP)", value: fmtFull(Math.max(0, monthlySpend * 12 - spAnnual)), color: T.blue, sub: `After ${fmtFull(spAnnual)}/yr State Pension` },
-          { label: "Total monthly income at 67+", value: fmtFull(monthlySpend), color: T.accent, sub: `Pot + SP combined` },
+          { label: `Total monthly income at ${spAge}+`, value: fmtFull(monthlySpend), color: T.accent, sub: `Pot + SP combined` },
         ].map((m, i) => (
           <div key={i} style={{ flex: "1 1 160px", padding: "10px 12px", background: T.bg, borderRadius: T.radius, border: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 3, textTransform: "uppercase", fontWeight: 500 }}>{m.label}</div>

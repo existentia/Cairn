@@ -9,7 +9,7 @@ services:
       - cairn_data:/app/data
     environment:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env - Cairn will not start without one}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - BACKUP_DIR=${BACKUP_DIR:-/app/data/backups}
       - BACKUP_RETAIN_DAYS=${BACKUP_RETAIN_DAYS:-14}
