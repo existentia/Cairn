@@ -7,7 +7,15 @@ import { TAX_YEAR_LABEL } from "../constants.js";
 export default function IhtEstimator({ netWorth, accounts }) {
   // Pre-fill with current estate value and whether there's a property
   const hasProperty = accounts.some((a) => a.type === "PROPERTY" && a.balance > 0);
-  const [estate, setEstate] = useState(Math.max(0, Math.round(netWorth)));
+  // Net worth includes pension balances, but pensions are only part of the
+  // estate for IHT from 6 April 2027 — so keep them separate. Defined benefit
+  // pensions (stored as a transfer value) are never part of the estate.
+  const sumTypes = (types) => accounts.filter((a) => types.includes(a.type)).reduce((s, a) => s + a.balance, 0);
+  const pensionPots = Math.max(0, Math.round(sumTypes(["PENSION_DC", "SIPP"])));
+  const allPensions = sumTypes(["PENSION_DC", "SIPP", "PENSION_DB"]);
+  const [estate, setEstate] = useState(Math.max(0, Math.round(netWorth - allPensions)));
+  const [pensionValue, setPensionValue] = useState(pensionPots);
+  const [includePensions, setIncludePensions] = useState(true);
   const [married, setMarried] = useState(true);
   const [hasResidence, setHasResidence] = useState(hasProperty);
   const [charity, setCharity] = useState(0);
@@ -22,6 +30,8 @@ export default function IhtEstimator({ netWorth, accounts }) {
         married,
         has_residence: hasResidence,
         charitable_bequest: charity,
+        pension_value: pensionValue,
+        include_pensions: includePensions,
       });
       setResult(r);
     } catch (e) {
@@ -55,12 +65,15 @@ export default function IhtEstimator({ netWorth, accounts }) {
         <p style={{ fontSize: 12, color: T.textDim, margin: "0 0 14px", lineHeight: 1.6 }}>
           Estimates IHT due on your estate using {TAX_YEAR_LABEL} allowances (frozen to April 2031).
           Standard rate 40% above the Nil Rate Band; reduced rate 36% if 10%+ goes to charity.
+          From 6 April 2027 unused pension pots count as part of the estate; switch that off to see the position under the rules before then.
         </p>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
-          <Field label="Estate Value" type="number" value={estate} onChange={setEstate} prefix="£" />
+          <Field label="Estate Value (excl. pensions)" type="number" value={estate} onChange={setEstate} prefix="£" />
+          <Field label="Unused Pension Pots" type="number" value={pensionValue} onChange={setPensionValue} prefix="£" />
           <Field label="Charitable Bequest" type="number" value={charity} onChange={setCharity} prefix="£" />
           <Toggle value={married} onChange={setMarried} label="Married / civil partner" />
           <Toggle value={hasResidence} onChange={setHasResidence} label="Home to direct descendants" />
+          <Toggle value={includePensions} onChange={setIncludePensions} label="Count pensions (April 2027 rules)" />
         </div>
         <Btn onClick={calculate}>{loading ? "Calculating..." : "Recalculate"}</Btn>
       </div>
@@ -101,6 +114,10 @@ export default function IhtEstimator({ netWorth, accounts }) {
           <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 18 }}>
             <h4 style={{ fontSize: 12, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 10px" }}>Calculation Breakdown</h4>
             {[
+              ...(result.inputs.include_pensions ? [
+                ["Estate excluding pensions", fmtFull(result.inputs.estate_ex_pensions)],
+                ["Plus: unused pension pots (from April 2027)", fmtFull(result.inputs.pension_value)],
+              ] : []),
               ["Estate value", fmtFull(result.inputs.estate_value)],
               ["Less: charitable bequest", `–${fmtFull(result.inputs.charitable_bequest)}`],
               ["Net estate", fmtFull(result.calculation.net_estate)],
@@ -123,7 +140,7 @@ export default function IhtEstimator({ netWorth, accounts }) {
           </div>
 
           <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.blue}`, borderRadius: T.radius, padding: "12px 16px", fontSize: 12, color: T.textMuted, lineHeight: 1.7 }}>
-            <strong style={{ color: T.blue }}>Planning notes:</strong> This is a simplified estimate. Real planning involves lifetime gifts (7-year potentially exempt transfers), Business Property Relief, pensions (currently outside the estate but changing from April 2027), and trusts. For estates likely to attract IHT, talking to a STEP-qualified solicitor or chartered tax adviser is well worth it.
+            <strong style={{ color: T.blue }}>Planning notes:</strong> This is a simplified estimate. Real planning involves lifetime gifts (7-year potentially exempt transfers), Business Property Relief, the spouse exemption, death benefits from defined benefit schemes, and trusts. For estates likely to attract IHT, talking to a STEP-qualified solicitor or chartered tax adviser is well worth it.
           </div>
         </>
       )}

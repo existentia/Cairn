@@ -54,7 +54,7 @@ ACCOUNTS = [
 PROFILE = dict(
     name="Alex Morgan", dob="1988-03-14", retirement_age=60, gross_salary=72000,
     pension_contrib_pct=6, employer_contrib_pct=5, employer_match_max_pct=8,
-    tax_code="S1257L", state_pension_annual=12548, children_count=1, spouse_income=34000,
+    tax_code="S1257L", monthly_spending=2600, state_pension_annual=12548, children_count=1, spouse_income=34000,
 )
 
 SETTINGS = dict(

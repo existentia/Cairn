@@ -12,6 +12,7 @@ import {
   ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT, LISA_CONTRIB_MAX_AGE,
   STATE_PENSION_ANNUAL_DEFAULT, TAX_YEAR_LABEL,
+  currentTaxYearLabel, sumTaxYearContributions,
 } from "./constants.js";
 
 import {
@@ -182,6 +183,12 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
             {form.type === "GIA" && (
               <Field label="Unrealised Gain" type="number" value={form.unrealised_gain || 0} onChange={(v) => upd("unrealised_gain", v)} prefix="£" small />
             )}
+            {(ISA_TYPES.has(form.type) || form.type === "SIPP") && (
+              <Field label={`Paid In ${currentTaxYearLabel()}`} type="number"
+                value={form.ytd_tax_year === currentTaxYearLabel() ? (form.ytd_contrib || 0) : 0}
+                onChange={(v) => setForm((p) => ({ ...p, ytd_contrib: v, ytd_tax_year: currentTaxYearLabel() }))}
+                prefix="£" small />
+            )}
             {form.type === "PENSION_DB" && (
               <Field label="Annual Pension at Retirement" type="number" value={form.db_annual_pension || 0} onChange={(v) => upd("db_annual_pension", v)} prefix="£" small />
             )}
@@ -200,6 +207,11 @@ function AccountRow({ account, editing, onToggle, onSave, onDelete, onMoveUp, on
               </>
             )}
           </div>
+          {(ISA_TYPES.has(form.type) || form.type === "SIPP") && (
+            <div style={{ fontSize: 10.5, color: T.textDim, margin: "-4px 0 10px", lineHeight: 1.5 }}>
+              "Paid in" is what you have actually put in since 6 April{form.type === "SIPP" ? " (the net amount you paid, before tax relief)" : ""}. Allowance tracking then uses it plus your regular contributions for the months left. Leave it untouched and Cairn estimates the year as monthly × 12.
+            </div>
+          )}
           <Field label="Notes" value={form.notes || ""} onChange={(v) => upd("notes", v)} />
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
             <Btn variant="danger" onClick={onDelete}>Delete</Btn>
@@ -261,11 +273,32 @@ function AccountForm({ onSave, onCancel }) {
    MAIN DASHBOARD
    ═══════════════════════════════════════════════════════════════════════════ */
 
+// The active tab (and tool) lives in the URL hash — #/accounts, #/tools/fire —
+// so refresh, back/forward and bookmarks all work.
+const TAB_IDS = ["overview", "accounts", "update", "goals", "projections", "advisor", "rates", "tools", "ai", "settings"];
+const TOOL_IDS = ["tax-year", "fire", "carry-forward", "salary-sacrifice", "bonus", "marginal", "iht", "debt-payoff"];
+const hashParts = () => window.location.hash.replace(/^#\/?/, "").split("/");
+const tabFromHash = () => (TAB_IDS.includes(hashParts()[0]) ? hashParts()[0] : "overview");
+const toolFromHash = () => {
+  const [tabId, toolId] = hashParts();
+  return tabId === "tools" && TOOL_IDS.includes(toolId) ? toolId : "tax-year";
+};
+
 export default function App() {
   const [authed, setAuthed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [loadError, setLoadError] = useState(null);
+  const [tab, setTabState] = useState(tabFromHash);
+  const setTab = useCallback((id) => {
+    setTabState(id);
+    if (tabFromHash() !== id) window.location.hash = `/${id}`;
+  }, []);
+  useEffect(() => {
+    const onHashChange = () => setTabState(tabFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
   const [editId, setEditId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -339,6 +372,7 @@ export default function App() {
     try {
       const d = await api.getDashboard();
       setData(d);
+      setLoadError(null);
       // Lazy-fetch BoE rate in the background if dashboard didn't carry one
       // (cache cold). Once it returns we merge into data so the mortgage-drift
       // advisor rule starts firing without needing a manual refresh.
@@ -349,6 +383,9 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to load data", e);
+      // Only matters when there's nothing to show yet; after a failed
+      // refresh the last good data stays on screen.
+      setLoadError(e?.message || "Request failed");
     }
   };
 
@@ -543,6 +580,16 @@ export default function App() {
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading...</div>;
   if (!authed) return <><style>{makeGlobalStyles()}</style><LoginScreen onLogin={handleLogin} /></>;
+  if (!data && loadError) return (
+    <>
+      <style>{makeGlobalStyles()}</style>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, justifyContent: "center", alignItems: "center", minHeight: "100vh", padding: 20, textAlign: "center" }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Couldn't load your data</div>
+        <div style={{ fontSize: 12, color: T.textMuted, maxWidth: 360 }}>The Cairn server didn't return the dashboard ({loadError}). Check the container is running, then try again.</div>
+        <Btn onClick={() => { setLoadError(null); loadData(); }} style={{ marginTop: 6 }}>Try again</Btn>
+      </div>
+    </>
+  );
   if (!data) return <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", color: T.textDim }}>Loading data...</div>;
 
   const { profile, accounts, settings, snapshots, goals = [] } = data;
@@ -1261,7 +1308,7 @@ export default function App() {
                 Real returns ({settings.growth_rate}% growth − {settings.inflation_rate}% inflation) · Today's money · ±1σ envelope (≈68% confidence) assumes {Math.round(FORECAST_SIGMA_ANNUAL * 100)}% annual volatility under a lognormal model
               </p>
               <ResponsiveContainer width="100%" height={340}>
-                <AreaChart data={projData}>
+                <ComposedChart data={projData}>
                   <defs>
                     <linearGradient id="pG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.blue} stopOpacity={0.2} /><stop offset="100%" stopColor={T.blue} stopOpacity={0} /></linearGradient>
                     <linearGradient id="iG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.green} stopOpacity={0.2} /><stop offset="100%" stopColor={T.green} stopOpacity={0} /></linearGradient>
@@ -1275,7 +1322,7 @@ export default function App() {
                   <Line isAnimationActive={false} type="monotone" dataKey="upper" name="Upper (+1σ)" stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
                   <Line isAnimationActive={false} type="monotone" dataKey="lower" name="Lower (−1σ)" stroke={T.red} strokeDasharray="4 3" strokeWidth={1.5} dot={false} />
                   <Legend wrapperStyle={{ fontSize: 10.5 }} />
-                </AreaChart>
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
 
@@ -1298,7 +1345,7 @@ export default function App() {
               </div>
             </div>
             <TaxYearSummary profile={profile} accounts={accounts} settings={settings} />
-            <DrawdownSimulator retirementPot={retirementPot} profile={profile} settings={settings} dbAnnualPension={dbAnnualPension} />
+            <DrawdownSimulator pensionPot={retirementPotData?.pensions || 0} isaPot={retirementPotData?.isas || 0} profile={profile} settings={settings} dbAnnualPension={dbAnnualPension} />
           </div>
           );
         })()}
@@ -1387,7 +1434,6 @@ function ProfileSettings({ profile, onSave, saving }) {
         <Field label="Gross Annual Salary" type="number" value={form.gross_salary} onChange={(v) => upd("gross_salary", v)} prefix="£" />
         <Field label="Your Pension %" type="number" value={form.pension_contrib_pct} onChange={(v) => upd("pension_contrib_pct", v)} suffix="%" small />
         <Field label="Employer %" type="number" value={form.employer_contrib_pct} onChange={(v) => upd("employer_contrib_pct", v)} suffix="%" small />
-        <Field label="Tax Code" value={form.tax_code} onChange={(v) => upd("tax_code", v)} small />
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <Field label="Employer Matches Up To" type="number" value={form.employer_match_max_pct ?? 0} onChange={(v) => upd("employer_match_max_pct", v)} suffix="%" small />
@@ -1403,6 +1449,14 @@ function ProfileSettings({ profile, onSave, saving }) {
         <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
           <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
             Used by the advisor: children for HICBC alerts (£60k–£80k), spouse income for Marriage Allowance opportunities. Leave both at 0 if not applicable.
+          </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <Field label="Monthly Spending (optional)" type="number" value={form.monthly_spending ?? 0} onChange={(v) => upd("monthly_spending", v)} prefix="£" />
+        <div style={{ flex: "1 1 200px", display: "flex", alignItems: "flex-end", paddingBottom: 1 }}>
+          <span style={{ fontSize: 10.5, color: T.textDim, lineHeight: 1.5 }}>
+            What you spend in a typical month, excluding savings and pension contributions. Used for the emergency fund check and as the starting figure in the FIRE calculator and Drawdown Simulator. Leave at 0 and Cairn estimates it from your salary.
           </span>
         </div>
       </div>
@@ -1483,9 +1537,9 @@ function TaxYearSummary({ profile, accounts, settings }) {
   const taxYearLabel = `${taxYearStartYear}/${String(taxYearStartYear + 1).slice(2)}`;
 
   // ISA
-  const isaMonthly = accounts.filter((a) => ISA_TYPES.has(a.type))
-    .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-  const isaAnnualRate = isaMonthly * 12;
+  // Recorded "paid in so far" figures where present, else monthly × 12.
+  const isaYear = sumTaxYearContributions(accounts.filter((a) => ISA_TYPES.has(a.type)), now);
+  const isaAnnualRate = isaYear.projected;
   const isaAllowance = settings.isa_allowance || ISA_ANNUAL_ALLOWANCE;
   const isaRemaining = Math.max(0, isaAllowance - isaAnnualRate);
   const isaUsedPct = Math.min(100, (isaAnnualRate / isaAllowance) * 100);
@@ -1493,7 +1547,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
   // LISA sub-allowance (counts within overall ISA limit but has its own £4k cap)
   const lisaAccounts = accounts.filter((a) => a.type === "ISA_LISA");
   const hasLISA = lisaAccounts.length > 0;
-  const lisaAnnualRate = lisaAccounts.reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 12;
+  const lisaAnnualRate = sumTaxYearContributions(lisaAccounts, now).projected;
   const lisaUsedPct = Math.min(100, (lisaAnnualRate / LISA_ANNUAL_ALLOWANCE) * 100);
   const lisaBonus = Math.round(lisaAnnualRate * (LISA_BONUS_PCT / 100));
 
@@ -1501,15 +1555,18 @@ function TaxYearSummary({ profile, accounts, settings }) {
   // + SIPP monthly contribs grossed up for assumed RAS basic-rate relief.
   const workplacePensionAnnual = profile.gross_salary * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
   const dcMonthlyContribs = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-  const sippMonthlyGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
-  const pensionAnnual = workplacePensionAnnual + (dcMonthlyContribs + sippMonthlyGross) * 12;
+  const sippYear = sumTaxYearContributions(accounts.filter((a) => a.type === "SIPP"), now);
+  const pensionAnnual = workplacePensionAnnual + dcMonthlyContribs * 12 + sippYear.projected / 0.8;
+  const usesRecorded = isaYear.anyActual || sippYear.anyActual;
   const pensionAllowance = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
   const pensionRemaining = Math.max(0, pensionAllowance - pensionAnnual);
   const pensionUsedPct = Math.min(100, (pensionAnnual / pensionAllowance) * 100);
 
   // Personal allowance
-  const taper = profile.gross_salary > PERSONAL_ALLOWANCE_TAPER_START
-    ? Math.min(PERSONAL_ALLOWANCE, Math.floor((profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START) / 2)) : 0;
+  // The taper tests income after workplace pension contributions (salary sacrifice).
+  const incomeAfterPension = profile.gross_salary * (1 - (profile.pension_contrib_pct || 0) / 100);
+  const taper = incomeAfterPension > PERSONAL_ALLOWANCE_TAPER_START
+    ? Math.min(PERSONAL_ALLOWANCE, Math.floor((incomeAfterPension - PERSONAL_ALLOWANCE_TAPER_START) / 2)) : 0;
   const effectivePA = PERSONAL_ALLOWANCE - taper;
 
   const Bar = ({ pct, color }) => (
@@ -1523,7 +1580,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px" }}>Tax Year Summary — {taxYearLabel}</h3>
-          <p style={{ fontSize: 10.5, color: T.textDim, margin: 0 }}>Estimated at current contribution rates</p>
+          <p style={{ fontSize: 10.5, color: T.textDim, margin: 0 }}>{usesRecorded ? "Amounts recorded as paid in so far, plus regular contributions to 5 April" : "Estimated at current contribution rates"}</p>
         </div>
         <div style={{ background: daysLeft <= 30 ? T.red + "22" : daysLeft <= 90 ? T.amber + "22" : T.bg,
           border: `1px solid ${daysLeft <= 30 ? T.red : daysLeft <= 90 ? T.amber : T.border}`,
@@ -1566,7 +1623,7 @@ function TaxYearSummary({ profile, accounts, settings }) {
           {taper > 0 ? (
             <>
               <div style={{ fontSize: 12, fontWeight: 600, fontFamily: T.mono, color: T.red }}>{fmtFull(effectivePA)}</div>
-              <div style={{ fontSize: 10.5, color: T.red, marginTop: 2 }}>Tapered — lost {fmtFull(taper)} (salary over £100k)</div>
+              <div style={{ fontSize: 10.5, color: T.red, marginTop: 2 }}>Tapered — lost {fmtFull(taper)} (income over £100k)</div>
               <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 3 }}>Sacrifice to £100k via pension to restore full PA</div>
             </>
           ) : (
@@ -2421,7 +2478,16 @@ function GoalsTab({ goals, accounts, netWorth, onAdd, onSave, onDelete }) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function ToolsTab({ profile, accounts, settings, netWorth }) {
-  const [activeTool, setActiveTool] = useState("tax-year");
+  const [activeTool, setActiveToolState] = useState(toolFromHash);
+  const setActiveTool = (id) => {
+    setActiveToolState(id);
+    window.location.hash = `/tools/${id}`;
+  };
+  useEffect(() => {
+    const onHashChange = () => setActiveToolState(toolFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   return (
     <div>

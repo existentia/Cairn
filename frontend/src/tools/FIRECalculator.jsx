@@ -3,7 +3,10 @@ import { T, Field } from "../ui.jsx";
 import { ASSET_TYPES, fmtFull, ageFromDob } from "../advisor.js";
 
 export default function FIRECalculator({ profile, accounts, settings, netWorth }) {
-  const defaultExpenses = Math.round(Math.max(1500, (profile.gross_salary * 0.55) / 12));
+  // Start from the user's own monthly spending if they've entered it.
+  const defaultExpenses = profile.monthly_spending > 0
+    ? Math.round(profile.monthly_spending)
+    : Math.round(Math.max(1500, (profile.gross_salary * 0.55) / 12));
   const [annualExpenses, setAnnualExpenses] = useState(defaultExpenses * 12);
   const [swr, setSwr] = useState(4);
 

@@ -4,7 +4,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd backend && FLASK_DEBUG=1 python3 app.py"],
+      "runtimeArgs": ["-c", "cd backend && ADMIN_PASSWORD=${ADMIN_PASSWORD:-local-dev-only} FLASK_DEBUG=1 python3 app.py"],
       "port": 8000
     },
     {

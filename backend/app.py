@@ -26,9 +26,13 @@ from uk_tax import (
     INVESTMENT_PENSION_TYPES, ISA_TYPES,
 )
 import uk_tax
-from snapshots import take_snapshot
+import boe
+from snapshots import take_snapshot, rescale_categories, upsert_snapshot_totals
 from migrations import run_migrations
-from db_auth import get_db, close_db, require_auth, DB_PATH
+from db_auth import (
+    get_db, close_db, require_auth, DB_PATH,
+    BadInput, json_body, as_number, as_text, as_date,
+)
 from routes_tools import tools_bp
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -37,7 +41,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = DB_PATH.parent
 STATIC_DIR = BASE_DIR / "static"
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+# Values the app refuses to start with: unset, the old docker-compose default,
+# and the .env.example placeholder. Checked in ensure_password_hash().
+INSECURE_PASSWORDS = {"", "changeme", "change-this-to-something-secure"}
 
 # 5 MB cap on request bodies — generous for JSON imports, blocks abuse.
 MAX_CONTENT_LENGTH = 5 * 1024 * 1024
@@ -56,15 +63,16 @@ app.register_blueprint(tools_bp)
 
 
 # ── Security headers ──────────────────────────────────────────────────────────
-# Defence-in-depth for the SPA. CSP allows Google Fonts (the only external
-# resource the app loads) and inline styles (the React tree uses style props
-# heavily — converting to classes would be a large refactor). Connect-src is
+# Defence-in-depth for the SPA. Everything is same-origin (fonts are bundled
+# via @fontsource, so the browser contacts no third party). Inline styles are
+# allowed because the React tree uses style props heavily — converting to
+# classes would be a large refactor. Connect-src is
 # limited to self so the front-end can only talk to /api on the same origin.
 
 CSP = (
     "default-src 'self'; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "font-src 'self'; "
     "script-src 'self'; "
     "img-src 'self' data:; "
     "connect-src 'self'; "
@@ -82,6 +90,107 @@ def add_security_headers(resp):
     resp.headers.setdefault("Content-Security-Policy", CSP)
     resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
     return resp
+
+
+# ── Input validation ──────────────────────────────────────────────────────────
+# Validators (db_auth.py) raise BadInput; this turns it into a 400 instead of
+# letting a malformed body surface as a 500.
+
+@app.errorhandler(BadInput)
+def handle_bad_input(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    # The API client expects JSON errors; everything else keeps Flask's default.
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Not found"}), 404
+    return e
+
+
+VALID_ACCOUNT_TYPES = ASSET_TYPES | LIABILITY_TYPES
+
+# Writable columns per table, by kind. Anything not listed is ignored, and
+# these tuples are the only source of column names for the dynamic SQL below.
+_ACCOUNT_NUMBERS = ("balance", "monthly_contrib", "interest_rate", "sort_order",
+                    "total_contributed", "db_annual_pension", "unrealised_gain", "ytd_contrib")
+_ACCOUNT_TEXT = ("provider", "rate_type", "fixed_until", "term_end_date", "notes", "ytd_tax_year")
+_PROFILE_NUMBERS = ("retirement_age", "gross_salary", "pension_contrib_pct", "employer_contrib_pct",
+                    "state_pension_annual", "employer_match_max_pct", "children_count", "spouse_income",
+                    "monthly_spending")
+_PROFILE_TEXT = ("name", "tax_code")
+_SETTINGS_NUMBERS = ("growth_rate", "inflation_rate", "isa_allowance", "pension_annual_allowance",
+                     "tracker_margin", "mortgage_remaining_years", "net_worth_target")
+_SETTINGS_TEXT = ("tax_year", "net_worth_target_date", "tax_region")
+_GOAL_NUMBERS = ("target_amount", "sort_order")
+_GOAL_TEXT = ("name", "description", "target_date", "icon", "link_type", "link_value")
+
+
+def _clean(data, numbers, text, partial):
+    """Whitelist and type-check a request object. With partial=True only the
+    keys present are returned (PATCH semantics); otherwise every field is
+    returned, blank ones as 0 / ""."""
+    if not isinstance(data, dict):
+        raise BadInput("Expected a JSON object")
+    out = {}
+    for key in numbers:
+        if key in data or not partial:
+            out[key] = as_number(data.get(key), key)
+    for key in text:
+        if key in data or not partial:
+            out[key] = as_text(data.get(key), key)
+    return out
+
+
+def _clean_account(data, partial=False):
+    out = _clean(data, _ACCOUNT_NUMBERS, _ACCOUNT_TEXT, partial)
+    if "name" in data or not partial:
+        out["name"] = as_text(data.get("name"), "name")
+        if not out["name"].strip():
+            raise BadInput("Account name is required")
+    if "type" in data or not partial:
+        acct_type = data.get("type")
+        # An unknown type would be stored but silently left out of every total.
+        if not isinstance(acct_type, str) or acct_type not in VALID_ACCOUNT_TYPES:
+            raise BadInput(f"Unknown account type: {acct_type!r}")
+        out["type"] = acct_type
+    if "contributing" in data or not partial:
+        out["contributing"] = 1 if data.get("contributing") else 0
+    return out
+
+
+def _clean_profile(data):
+    out = _clean(data, _PROFILE_NUMBERS, _PROFILE_TEXT, partial=True)
+    if "dob" in data:
+        out["dob"] = as_date(data["dob"], "dob")
+    return out
+
+
+def _clean_settings(data):
+    return _clean(data, _SETTINGS_NUMBERS, _SETTINGS_TEXT, partial=True)
+
+
+def _clean_goal(data, partial=False):
+    return _clean(data, _GOAL_NUMBERS, _GOAL_TEXT, partial)
+
+
+def _insert_row(db, table, values):
+    """INSERT a cleaned dict. Column names come from the whitelists above."""
+    cols = list(values)
+    return db.execute(
+        f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+        [values[c] for c in cols],
+    )
+
+
+def _update_row(db, table, row_id, values):
+    """UPDATE the given columns of one row (plus updated_at)."""
+    assignments = ", ".join(f"{c} = ?" for c in values)
+    db.execute(
+        f"UPDATE {table} SET {assignments}, updated_at = datetime('now') WHERE id = ?",
+        [*values.values(), row_id],
+    )
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -219,7 +328,15 @@ def init_db():
 def ensure_password_hash():
     """Hash ADMIN_PASSWORD and store it, or update the hash if the password changed.
     When the password changes, all existing Bearer tokens are invalidated so
-    rotating the env var actually forces re-login everywhere."""
+    rotating the env var actually forces re-login everywhere.
+
+    Exits rather than start with no password or a known placeholder — this
+    app holds someone's finances, and the repo (defaults included) is public."""
+    if ADMIN_PASSWORD.strip() in INSECURE_PASSWORDS:
+        raise SystemExit(
+            "Cairn will not start: ADMIN_PASSWORD is unset or still a placeholder. "
+            "Set a real password in .env (or the container's environment) and start again."
+        )
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     row = db.execute("SELECT password_hash FROM auth WHERE id = 1").fetchone()
@@ -315,9 +432,9 @@ def _clear_auth_failures(db, ip):
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    username = data.get("username", "")
-    password = data.get("password", "")
+    data = json_body()
+    username = as_text(data.get("username"), "username")
+    password = as_text(data.get("password"), "password")
     db = get_db()
     ip = _client_ip()
 
@@ -379,25 +496,13 @@ def get_profile():
 @app.route("/api/profile", methods=["PUT"])
 @require_auth
 def update_profile():
-    data = request.get_json()
+    """Update the profile. Only the fields present in the body change — a
+    partial payload no longer resets everything else to its default."""
+    values = _clean_profile(json_body())
+    if not values:
+        return jsonify({"error": "No fields to update"}), 400
     db = get_db()
-    db.execute("""
-        UPDATE profile SET
-            name = ?, dob = ?, retirement_age = ?, gross_salary = ?,
-            pension_contrib_pct = ?, employer_contrib_pct = ?, tax_code = ?,
-            state_pension_annual = ?, employer_match_max_pct = ?,
-            children_count = ?, spouse_income = ?,
-            updated_at = datetime('now')
-        WHERE id = 1
-    """, (
-        data.get("name", ""), data.get("dob", "1980-01-01"),
-        data.get("retirement_age", 57), data.get("gross_salary", 0),
-        data.get("pension_contrib_pct", 0), data.get("employer_contrib_pct", 0),
-        data.get("tax_code", "1257L"),
-        data.get("state_pension_annual", uk_tax.STATE_PENSION_ANNUAL_DEFAULT),
-        data.get("employer_match_max_pct", 0),
-        data.get("children_count", 0), data.get("spouse_income", 0),
-    ))
+    _update_row(db, "profile", 1, values)
     db.commit()
     return jsonify({"ok": True})
 
@@ -415,23 +520,9 @@ def get_accounts():
 @app.route("/api/accounts", methods=["POST"])
 @require_auth
 def create_account():
-    data = request.get_json()
+    values = _clean_account(json_body())
     db = get_db()
-    cursor = db.execute("""
-        INSERT INTO accounts (name, type, balance, provider, contributing,
-            monthly_contrib, interest_rate, rate_type, fixed_until,
-            term_end_date, notes, sort_order, total_contributed,
-            db_annual_pension, unrealised_gain)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data["name"], data["type"], data.get("balance", 0),
-        data.get("provider", ""), data.get("contributing", False),
-        data.get("monthly_contrib", 0), data.get("interest_rate", 0),
-        data.get("rate_type", ""), data.get("fixed_until", ""),
-        data.get("term_end_date", ""), data.get("notes", ""),
-        data.get("sort_order", 0), data.get("total_contributed", 0),
-        data.get("db_annual_pension", 0), data.get("unrealised_gain", 0),
-    ))
+    cursor = _insert_row(db, "accounts", values)
     db.commit()
     return jsonify({"id": cursor.lastrowid}), 201
 
@@ -439,25 +530,11 @@ def create_account():
 @app.route("/api/accounts/<int:account_id>", methods=["PUT"])
 @require_auth
 def update_account(account_id):
-    data = request.get_json()
-    db = get_db()
-    fields = []
-    values = []
-    allowed = [
-        "name", "type", "balance", "provider", "contributing",
-        "monthly_contrib", "interest_rate", "rate_type", "fixed_until",
-        "term_end_date", "notes", "sort_order", "total_contributed",
-        "db_annual_pension", "unrealised_gain",
-    ]
-    for key in allowed:
-        if key in data:
-            fields.append(f"{key} = ?")
-            values.append(data[key])
-    if not fields:
+    values = _clean_account(json_body(), partial=True)
+    if not values:
         return jsonify({"error": "No fields to update"}), 400
-    fields.append("updated_at = datetime('now')")
-    values.append(account_id)
-    db.execute(f"UPDATE accounts SET {', '.join(fields)} WHERE id = ?", values)
+    db = get_db()
+    _update_row(db, "accounts", account_id, values)
     db.commit()
     return jsonify({"ok": True})
 
@@ -488,8 +565,10 @@ def get_snapshots():
 @require_auth
 def create_snapshot():
     """Take a snapshot of current net worth. Can be called manually or via cron."""
-    payload = request.get_json(silent=True) or {}
-    snapshot_date, net_worth = take_snapshot(get_db(), payload.get("date"))
+    payload = request.get_json(silent=True)
+    payload = payload if isinstance(payload, dict) else {}
+    requested = as_date(payload.get("date"), "date", allow_blank=True) or None
+    snapshot_date, net_worth = take_snapshot(get_db(), requested)
     return jsonify({"date": snapshot_date, "net_worth": net_worth}), 201
 
 
@@ -499,49 +578,33 @@ def update_snapshot(snapshot_id):
     """Edit a snapshot's date or values. If totals change, scale the stored
     category breakdown proportionally so the line chart and stacked chart
     stay consistent."""
-    data = request.get_json()
+    data = json_body()
     db = get_db()
     existing = db.execute("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
     if not existing:
         return jsonify({"error": "Snapshot not found"}), 404
 
-    fields = []
-    values = []
-    allowed = ["date", "net_worth", "total_assets", "total_liabilities"]
-    for key in allowed:
+    values = {}
+    if "date" in data:
+        values["date"] = as_date(data["date"], "date")
+    for key in ("net_worth", "total_assets", "total_liabilities"):
         if key in data:
-            fields.append(f"{key} = ?")
-            values.append(data[key])
-    if not fields:
+            values[key] = as_number(data[key], key)
+    if not values:
         return jsonify({"error": "No fields to update"}), 400
-    values.append(snapshot_id)
-    db.execute(f"UPDATE snapshots SET {', '.join(fields)} WHERE id = ?", values)
 
-    new_assets = data.get("total_assets", existing["total_assets"])
-    new_liabs = data.get("total_liabilities", existing["total_liabilities"])
-    old_assets = existing["total_assets"] or 0
-    old_liabs = existing["total_liabilities"] or 0
-    if new_assets != old_assets or new_liabs != old_liabs:
-        cats = db.execute(
-            "SELECT id, category, value FROM snapshot_categories WHERE snapshot_id = ?",
-            (snapshot_id,)
-        ).fetchall()
-        for c in cats:
-            if c["category"] == "debts":
-                if old_liabs > 0:
-                    new_val = c["value"] * (new_liabs / old_liabs)
-                else:
-                    new_val = -new_liabs
-            else:
-                if old_assets > 0:
-                    new_val = c["value"] * (new_assets / old_assets)
-                else:
-                    new_val = c["value"]
-            db.execute(
-                "UPDATE snapshot_categories SET value = ? WHERE id = ?",
-                (new_val, c["id"])
-            )
+    assignments = ", ".join(f"{k} = ?" for k in values)
+    try:
+        db.execute(f"UPDATE snapshots SET {assignments} WHERE id = ?", [*values.values(), snapshot_id])
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "A snapshot already exists for that date"}), 409
 
+    rescale_categories(
+        db, snapshot_id,
+        existing["total_assets"], existing["total_liabilities"],
+        values.get("total_assets", existing["total_assets"]),
+        values.get("total_liabilities", existing["total_liabilities"]),
+    )
     db.commit()
     return jsonify({"ok": True})
 
@@ -566,14 +629,15 @@ def import_snapshots_csv():
     total_assets and total_liabilities are optional and default to net_worth
     and 0 respectively if absent.
 
-    Uses INSERT OR REPLACE on date, so re-importing overwrites existing rows.
+    Rows are upserted by date, so re-importing overwrites the totals of
+    existing rows while keeping (and rescaling) their category breakdown.
     """
     import csv as csv_lib
     import io
     from datetime import datetime as _dt
 
-    data = request.get_json() or {}
-    csv_text = (data.get("csv") or "").strip()
+    data = json_body()
+    csv_text = as_text(data.get("csv"), "csv").strip()
     if not csv_text:
         return jsonify({"error": "Empty CSV"}), 400
 
@@ -621,11 +685,8 @@ def import_snapshots_csv():
         total_assets = _opt("total_assets", net_worth if net_worth > 0 else 0)
         total_liabilities = _opt("total_liabilities", 0)
 
-        db.execute(
-            "INSERT OR REPLACE INTO snapshots (date, total_assets, total_liabilities, net_worth) "
-            "VALUES (?, ?, ?, ?)",
-            (raw_date, total_assets, total_liabilities, net_worth)
-        )
+        # Upsert by date: an existing row keeps its id and category breakdown.
+        upsert_snapshot_totals(db, raw_date, net_worth, total_assets, total_liabilities)
         imported += 1
 
     db.commit()
@@ -657,17 +718,9 @@ def get_goals():
 @app.route("/api/goals", methods=["POST"])
 @require_auth
 def create_goal():
-    data = request.get_json()
+    values = _clean_goal(json_body())
     db = get_db()
-    cursor = db.execute("""
-        INSERT INTO goals (name, description, target_amount, target_date, icon, link_type, link_value, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data.get("name", ""), data.get("description", ""),
-        data.get("target_amount", 0), data.get("target_date", ""),
-        data.get("icon", ""), data.get("link_type", ""),
-        data.get("link_value", ""), data.get("sort_order", 0),
-    ))
+    cursor = _insert_row(db, "goals", values)
     db.commit()
     row = db.execute("SELECT * FROM goals WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return jsonify(dict(row)), 201
@@ -676,19 +729,11 @@ def create_goal():
 @app.route("/api/goals/<int:goal_id>", methods=["PUT"])
 @require_auth
 def update_goal(goal_id):
-    data = request.get_json()
-    db = get_db()
-    allowed = ["name", "description", "target_amount", "target_date", "icon", "link_type", "link_value", "sort_order"]
-    fields, values = [], []
-    for key in allowed:
-        if key in data:
-            fields.append(f"{key} = ?")
-            values.append(data[key])
-    if not fields:
+    values = _clean_goal(json_body(), partial=True)
+    if not values:
         return jsonify({"error": "No fields to update"}), 400
-    fields.append("updated_at = datetime('now')")
-    values.append(goal_id)
-    db.execute(f"UPDATE goals SET {', '.join(fields)} WHERE id = ?", values)
+    db = get_db()
+    _update_row(db, "goals", goal_id, values)
     db.commit()
     return jsonify({"ok": True})
 
@@ -715,25 +760,12 @@ def get_settings():
 @app.route("/api/settings", methods=["PUT"])
 @require_auth
 def update_settings():
-    data = request.get_json()
+    """Update settings. Only the fields present in the body change."""
+    values = _clean_settings(json_body())
+    if not values:
+        return jsonify({"error": "No fields to update"}), 400
     db = get_db()
-    db.execute("""
-        UPDATE settings SET
-            growth_rate = ?, inflation_rate = ?, isa_allowance = ?,
-            pension_annual_allowance = ?, tax_year = ?,
-            tracker_margin = ?, mortgage_remaining_years = ?,
-            net_worth_target = ?, net_worth_target_date = ?,
-            tax_region = ?,
-            updated_at = datetime('now')
-        WHERE id = 1
-    """, (
-        data.get("growth_rate", 5.0), data.get("inflation_rate", 2.5),
-        data.get("isa_allowance", 20000), data.get("pension_annual_allowance", 60000),
-        data.get("tax_year", uk_tax.TAX_YEAR_LABEL),
-        data.get("tracker_margin", 0.5), data.get("mortgage_remaining_years", 20),
-        data.get("net_worth_target", 0), data.get("net_worth_target_date", ""),
-        data.get("tax_region", "scotland"),
-    ))
+    _update_row(db, "settings", 1, values)
     db.commit()
     return jsonify({"ok": True})
 
@@ -772,13 +804,11 @@ def get_dashboard():
 
     goals = [dict(r) for r in db.execute("SELECT * FROM goals ORDER BY sort_order, id").fetchall()]
 
-    # Best-effort current BoE base rate (used by advisor's mortgage-drift rule).
-    # Returns whatever's already cached; if nothing's been fetched yet the rule
-    # silently skips. The /api/rates/boe-base-rate endpoint populates the cache
-    # when the user visits the Rates tab (and the cron snapshot warms it too).
-    boe_rate = None
-    if BOE_RATE_CACHE.get("data"):
-        boe_rate = BOE_RATE_CACHE["data"].get("current_rate")
+    # Current BoE base rate for the advisor's mortgage-drift rule. Read from the
+    # SQLite cache only — no network here, so the dashboard stays fast. It is
+    # None until /api/rates/boe-base-rate has run once (the frontend calls it
+    # in the background when it sees null).
+    boe_rate = boe.cached_current_rate(db)
 
     return jsonify({
         "profile": profile,
@@ -838,7 +868,7 @@ def _backup_database(prefix="preimport"):
 @app.route("/api/import", methods=["POST"])
 @require_auth
 def import_data():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not isinstance(data, dict) or not data:
         return jsonify({"error": "Import payload must be a JSON object"}), 400
 
@@ -866,85 +896,60 @@ def import_data():
 
 def _apply_import(db, data):
     """Apply an import payload inside the caller's transaction. Raises on any
-    malformed row — the caller rolls back, so partial imports never land."""
+    malformed row — the caller rolls back, so partial imports never land.
+    Rows go through the same cleaners as the normal CRUD routes."""
     if "profile" in data:
-        p = data["profile"]
-        db.execute("""
-            UPDATE profile SET name=?, dob=?, retirement_age=?, gross_salary=?,
-                pension_contrib_pct=?, employer_contrib_pct=?, tax_code=?,
-                state_pension_annual=?, employer_match_max_pct=?,
-                children_count=?, spouse_income=?,
-                updated_at=datetime('now')
-            WHERE id = 1
-        """, (p.get("name",""), p.get("dob","1980-01-01"), p.get("retirement_age",57),
-              p.get("gross_salary",0), p.get("pension_contrib_pct",0),
-              p.get("employer_contrib_pct",0), p.get("tax_code","1257L"),
-              p.get("state_pension_annual",uk_tax.STATE_PENSION_ANNUAL_DEFAULT), p.get("employer_match_max_pct",0),
-              p.get("children_count",0), p.get("spouse_income",0)))
+        values = _clean_profile(data["profile"])
+        if values:
+            _update_row(db, "profile", 1, values)
 
     if "accounts" in data:
+        if not isinstance(data["accounts"], list):
+            raise BadInput("'accounts' must be a list")
+        cleaned = [_clean_account(a) for a in data["accounts"]]
         db.execute("DELETE FROM accounts")
-        for a in data["accounts"]:
-            db.execute("""
-                INSERT INTO accounts (name,type,balance,provider,contributing,
-                    monthly_contrib,interest_rate,rate_type,fixed_until,
-                    term_end_date,notes,sort_order,total_contributed,
-                    db_annual_pension,unrealised_gain)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (a["name"], a["type"], a.get("balance",0), a.get("provider",""),
-                  a.get("contributing",0), a.get("monthly_contrib",0),
-                  a.get("interest_rate",0), a.get("rate_type",""),
-                  a.get("fixed_until",""), a.get("term_end_date",""),
-                  a.get("notes",""), a.get("sort_order",0),
-                  a.get("total_contributed",0), a.get("db_annual_pension",0),
-                  a.get("unrealised_gain",0)))
+        for values in cleaned:
+            _insert_row(db, "accounts", values)
 
     if "settings" in data:
-        s = data["settings"]
-        db.execute("""
-            UPDATE settings SET growth_rate=?, inflation_rate=?, isa_allowance=?,
-                pension_annual_allowance=?, tax_year=?,
-                tracker_margin=?, mortgage_remaining_years=?,
-                net_worth_target=?, net_worth_target_date=?,
-                tax_region=?, updated_at=datetime('now')
-            WHERE id = 1
-        """, (s.get("growth_rate",5.0), s.get("inflation_rate",2.5),
-              s.get("isa_allowance",20000), s.get("pension_annual_allowance",60000),
-              s.get("tax_year",uk_tax.TAX_YEAR_LABEL),
-              s.get("tracker_margin",0.5), s.get("mortgage_remaining_years",20),
-              s.get("net_worth_target",0), s.get("net_worth_target_date",""),
-              s.get("tax_region","scotland")))
+        values = _clean_settings(data["settings"])
+        if values:
+            _update_row(db, "settings", 1, values)
 
     if "snapshots" in data:
+        if not isinstance(data["snapshots"], list):
+            raise BadInput("'snapshots' must be a list")
         for snap in data["snapshots"]:
-            db.execute("""
-                INSERT OR REPLACE INTO snapshots (date, net_worth, total_assets,
-                    total_liabilities, breakdown)
-                VALUES (?,?,?,?,?)
-            """, (snap["date"], snap["net_worth"], snap.get("total_assets",0),
-                  snap.get("total_liabilities",0), snap.get("breakdown","{}")))
+            if not isinstance(snap, dict):
+                raise BadInput("Each snapshot must be an object")
+            sid = upsert_snapshot_totals(
+                db,
+                as_date(snap.get("date"), "snapshot date"),
+                as_number(snap.get("net_worth"), "net_worth"),
+                as_number(snap.get("total_assets"), "total_assets"),
+                as_number(snap.get("total_liabilities"), "total_liabilities"),
+            )
+            if "breakdown" in snap:
+                db.execute("UPDATE snapshots SET breakdown = ? WHERE id = ?",
+                           (as_text(snap["breakdown"], "breakdown", "{}"), sid))
             cats = snap.get("categories") or {}
             if cats:
-                sid_row = db.execute("SELECT id FROM snapshots WHERE date = ?", (snap["date"],)).fetchone()
-                if sid_row:
-                    sid = sid_row["id"]
-                    db.execute("DELETE FROM snapshot_categories WHERE snapshot_id = ?", (sid,))
-                    for cat, value in cats.items():
-                        db.execute(
-                            "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, ?, ?)",
-                            (sid, cat, value),
-                        )
+                if not isinstance(cats, dict):
+                    raise BadInput("Snapshot 'categories' must be an object")
+                db.execute("DELETE FROM snapshot_categories WHERE snapshot_id = ?", (sid,))
+                for cat, value in cats.items():
+                    db.execute(
+                        "INSERT INTO snapshot_categories (snapshot_id, category, value) VALUES (?, ?, ?)",
+                        (sid, cat, as_number(value, f"category {cat}")),
+                    )
 
     if "goals" in data:
+        if not isinstance(data["goals"], list):
+            raise BadInput("'goals' must be a list")
+        cleaned = [_clean_goal(g) for g in data["goals"]]
         db.execute("DELETE FROM goals")
-        for g in data["goals"]:
-            db.execute("""
-                INSERT INTO goals (name, description, target_amount, target_date,
-                    icon, link_type, link_value, sort_order)
-                VALUES (?,?,?,?,?,?,?,?)
-            """, (g.get("name",""), g.get("description",""), g.get("target_amount",0),
-                  g.get("target_date",""), g.get("icon",""), g.get("link_type",""),
-                  g.get("link_value",""), g.get("sort_order",0)))
+        for values in cleaned:
+            _insert_row(db, "goals", values)
 
 
 # ── AI Commentary (Claude API) ────────────────────────────────────────────────
@@ -970,7 +975,7 @@ _COMMENTARY_SYSTEM_PROMPT = f"""You are a UK personal finance commentator built 
 
 Write three or four short paragraphs of plain prose, roughly 250 to 350 words in total. The review appears in a plain-text panel that does not render markdown, so asterisks, hashes or list markers would show up as literal characters. Write it the way you would write a letter.
 
-Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value. Cairn does not record spending or a target retirement income, so don't list those as missing data; where they matter for judging whether retirement is on track, suggest the user tries their own figures in Cairn's FIRE calculator or drawdown simulator.
+Be direct and specific to the numbers you are given. Open with the one or two observations that would make the biggest difference, quote the figures behind them, and leave out anything that is simply fine. Where something is going well, say so briefly; where something needs attention, say so plainly. Work only from the data provided: if something you would need is missing, such as an age or any pension data, say what is missing rather than assuming a value. Cairn does not record a target retirement income, and monthly spending appears in the data only if the user has entered it. Where a spending figure is given, use it to judge whether the projected retirement income looks sufficient. Where it is absent, don't list it as missing data; if it matters for judging whether retirement is on track, suggest the user tries their own figures in Cairn's FIRE calculator or drawdown simulator.
 
 The retirement income section lists the guaranteed income Cairn knows about. Use the State Pension figure as given and say whether it is the user's own forecast or Cairn's default, because a default may overstate what someone with gaps in their National Insurance record will get. Bear in mind that it only starts at State Pension age, so any years between the target retirement age and State Pension age have to be bridged from savings.
 
@@ -983,7 +988,7 @@ Personal Allowance is {_gbp(uk_tax.PERSONAL_ALLOWANCE)}. It tapers away by £1 f
 Scotland has six income tax bands; its {uk_tax.SCOTLAND_HIGHER_RATE_PCT}% higher rate starts at {_gbp(uk_tax.SCOTLAND_HIGHER_RATE_THRESHOLD)}. The rest of the UK has three bands; its {uk_tax.RUK_HIGHER_RATE_PCT}% higher rate starts at {_gbp(uk_tax.RUK_HIGHER_RATE_THRESHOLD)}. National Insurance is the same everywhere: {uk_tax.NI_RATE_MAIN:.0%} between {_gbp(uk_tax.NI_PRIMARY_THRESHOLD)} and {_gbp(uk_tax.NI_UPPER_EARNINGS_LIMIT)}, {uk_tax.NI_RATE_UEL_PLUS:.0%} above. Salary sacrifice into a pension saves both income tax and employee NI.
 ISA allowance is {_gbp(uk_tax.ISA_ANNUAL_ALLOWANCE)} a year across all ISAs. A Lifetime ISA takes up to {_gbp(uk_tax.LISA_ANNUAL_ALLOWANCE)} of that with a {uk_tax.LISA_BONUS_PCT}% government bonus, can be opened before {uk_tax.LISA_OPEN_MAX_AGE}, and is penalty-free from {uk_tax.LISA_ACCESS_AGE} or for a first home.
 Pension annual allowance is {_gbp(uk_tax.PENSION_ANNUAL_ALLOWANCE)}, with unused allowance carried forward from the three previous tax years. It tapers for very high earners (threshold income above {_gbp(uk_tax.AA_TAPER_THRESHOLD_INCOME)} and adjusted income above {_gbp(uk_tax.AA_TAPER_ADJUSTED_INCOME)}) to a minimum of {_gbp(uk_tax.AA_TAPER_MIN_ALLOWANCE)}.
-Private pensions can be accessed from 55, rising to {uk_tax.PENSION_ACCESS_AGE} in April 2028. State Pension age is {uk_tax.STATE_PENSION_AGE}, and the full new State Pension is roughly {_gbp(uk_tax.STATE_PENSION_ANNUAL_DEFAULT)} a year.
+Private pensions can be accessed from 55, rising to {uk_tax.PENSION_ACCESS_AGE} in April 2028. State Pension age is 66, 67 or 68 depending on date of birth (the user's is given in the retirement income section), and the full new State Pension is roughly {_gbp(uk_tax.STATE_PENSION_ANNUAL_DEFAULT)} a year.
 Capital gains outside ISAs and pensions have a {_gbp(uk_tax.CGT_ANNUAL_ALLOWANCE)} annual exemption, then {uk_tax.CGT_BASIC_RATE_PCT}% or {uk_tax.CGT_HIGHER_RATE_PCT}%.
 For retirement drawdown, 4% is the common benchmark; 3 to 3.5% is more conservative for early retirees with longer horizons.
 </uk_rules>"""
@@ -1049,7 +1054,7 @@ def _build_commentary_input(db):
     sp_is_default = round(sp_annual) == uk_tax.STATE_PENSION_ANNUAL_DEFAULT
     db_income = sum((a.get("db_annual_pension") or 0) for a in accounts if a["type"] == "PENSION_DB")
     retirement_lines = [
-        f"State Pension: {_gbp(sp_annual)}/year from State Pension age {uk_tax.STATE_PENSION_AGE}"
+        f"State Pension: {_gbp(sp_annual)}/year from State Pension age {uk_tax.state_pension_age(profile.get('dob'))}"
         + (" (Cairn's full-rate default; the user hasn't entered their own forecast)" if sp_is_default
            else " (the user's own forecast)"),
         f"Defined benefit pension income: {_gbp(db_income)}/year" if db_income
@@ -1070,6 +1075,9 @@ def _build_commentary_input(db):
         f"Gross salary: {_gbp(gross)}\n"
         f"Workplace pension: {emp_pct}% employee + {er_pct}% employer = {_gbp(pension_annual)}/year\n"
         f"ISA contributions: {_gbp(isa_monthly)}/month\n"
+        + (f"Monthly spending (entered by the user): {_gbp(profile['monthly_spending'])}\n"
+           if profile.get("monthly_spending") else "")
+        +
         f"Net worth: {_gbp(net_worth)} (assets {_gbp(total_assets)}, liabilities {_gbp(total_liabilities)})\n"
         f"Planning assumptions: {settings['growth_rate']}% growth, {settings['inflation_rate']}% inflation\n"
         "</financial_snapshot>\n\n"
@@ -1164,168 +1172,13 @@ def ai_commentary():
 
 # ── BoE Base Rate Data ────────────────────────────────────────────────────────
 
-BOE_RATE_CACHE = {"data": None, "fetched": None}
-
 @app.route("/api/rates/boe-base-rate", methods=["GET"])
 @require_auth
 def boe_base_rate():
-    """Fetch Bank of England base rate history from their public statistical API.
-    Caches for 24 hours since it only changes ~8 times a year."""
-    import urllib.request
-    import http.cookiejar
-    import csv
-    import io
-
-    now = datetime.now()
-
-    # Return cache if less than 24h old
-    if BOE_RATE_CACHE["data"] and BOE_RATE_CACHE["fetched"]:
-        age = (now - BOE_RATE_CACHE["fetched"]).total_seconds()
-        if age < 86400:
-            return jsonify(BOE_RATE_CACHE["data"])
-
-    # BoE requires cookies — use a cookie-enabled opener
-    try:
-        cj = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,text/csv,text/plain,*/*",
-        }
-
-        # Step 1: Hit the main database page to establish a session and get cookies
-        init_req = urllib.request.Request(
-            "https://www.bankofengland.co.uk/boeapps/database/",
-            headers=headers,
-        )
-        opener.open(init_req, timeout=10)
-
-        # Step 2: Fetch the CSV data using the documented API endpoint
-        from_date = "01/Jan/2000"
-        to_date = now.strftime("%d/%b/%Y")
-        csv_url = (
-            f"https://www.bankofengland.co.uk/boeapps/database/"
-            f"_iadb-fromshowcolumns.asp?csv.x=yes"
-            f"&Datefrom={from_date}&Dateto={to_date}"
-            f"&SeriesCodes=IUDBEDR&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N"
-        )
-
-        csv_req = urllib.request.Request(csv_url, headers=headers)
-        with opener.open(csv_req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-
-        # Check if we got HTML instead of CSV (cookie/redirect issue)
-        if "<!DOCTYPE" in raw[:100] or "<html" in raw[:100].lower():
-            raise ValueError("BoE returned HTML instead of CSV — cookie session may have failed")
-
-        # Parse CSV — BoE format: DATE, VALUE
-        rates = []
-        reader = csv.reader(io.StringIO(raw))
-        for row in reader:
-            if len(row) >= 2:
-                date_str = row[0].strip()
-                rate_str = row[1].strip()
-                try:
-                    d = datetime.strptime(date_str, "%d %b %Y")
-                    r = float(rate_str)
-                    rates.append({"date": d.strftime("%Y-%m-%d"), "rate": r})
-                except (ValueError, TypeError):
-                    continue
-
-        if not rates:
-            raise ValueError("No rate data parsed from BoE CSV response")
-
-        # Sort by date
-        rates.sort(key=lambda x: x["date"])
-
-        # Build a monthly series
-        monthly = []
-        current_rate = rates[0]["rate"]
-        rate_idx = 0
-        start_year = int(rates[0]["date"][:4])
-
-        for year in range(start_year, now.year + 1):
-            for month in range(1, 13):
-                if year == now.year and month > now.month:
-                    break
-                month_start = f"{year}-{month:02d}-01"
-                while rate_idx < len(rates) - 1 and rates[rate_idx + 1]["date"] <= month_start:
-                    rate_idx += 1
-                    current_rate = rates[rate_idx]["rate"]
-                monthly.append({"date": month_start, "rate": current_rate})
-
-        result = {
-            "current_rate": rates[-1]["rate"],
-            "current_date": rates[-1]["date"],
-            "history": monthly,
-            "changes": rates[-20:],
-        }
-
-        BOE_RATE_CACHE["data"] = result
-        BOE_RATE_CACHE["fetched"] = now
-
-        return jsonify(result)
-
-    except Exception as e:
-        # Comprehensive fallback — BoE base rate history (key change dates)
-        fallback_changes = [
-            {"date": "2000-02-10", "rate": 6.00}, {"date": "2001-02-08", "rate": 5.75},
-            {"date": "2001-04-05", "rate": 5.50}, {"date": "2001-05-10", "rate": 5.25},
-            {"date": "2001-08-02", "rate": 5.00}, {"date": "2001-09-18", "rate": 4.75},
-            {"date": "2001-10-04", "rate": 4.50}, {"date": "2001-11-08", "rate": 4.00},
-            {"date": "2003-02-06", "rate": 3.75}, {"date": "2003-07-10", "rate": 3.50},
-            {"date": "2003-11-06", "rate": 3.75}, {"date": "2004-02-05", "rate": 4.00},
-            {"date": "2004-05-06", "rate": 4.25}, {"date": "2004-06-10", "rate": 4.50},
-            {"date": "2004-08-05", "rate": 4.75}, {"date": "2005-08-04", "rate": 4.50},
-            {"date": "2006-08-03", "rate": 4.75}, {"date": "2006-11-09", "rate": 5.00},
-            {"date": "2007-01-11", "rate": 5.25}, {"date": "2007-05-10", "rate": 5.50},
-            {"date": "2007-07-05", "rate": 5.75}, {"date": "2007-12-06", "rate": 5.50},
-            {"date": "2008-02-07", "rate": 5.25}, {"date": "2008-04-10", "rate": 5.00},
-            {"date": "2008-10-08", "rate": 4.50}, {"date": "2008-11-06", "rate": 3.00},
-            {"date": "2008-12-04", "rate": 2.00}, {"date": "2009-01-08", "rate": 1.50},
-            {"date": "2009-02-05", "rate": 1.00}, {"date": "2009-03-05", "rate": 0.50},
-            {"date": "2016-08-04", "rate": 0.25}, {"date": "2017-11-02", "rate": 0.50},
-            {"date": "2018-08-02", "rate": 0.75}, {"date": "2020-03-11", "rate": 0.25},
-            {"date": "2020-03-19", "rate": 0.10}, {"date": "2021-12-16", "rate": 0.25},
-            {"date": "2022-02-03", "rate": 0.50}, {"date": "2022-03-17", "rate": 0.75},
-            {"date": "2022-05-05", "rate": 1.00}, {"date": "2022-06-16", "rate": 1.25},
-            {"date": "2022-08-04", "rate": 1.75}, {"date": "2022-09-22", "rate": 2.25},
-            {"date": "2022-11-03", "rate": 3.00}, {"date": "2022-12-15", "rate": 3.50},
-            {"date": "2023-02-02", "rate": 4.00}, {"date": "2023-03-23", "rate": 4.25},
-            {"date": "2023-05-11", "rate": 4.50}, {"date": "2023-06-22", "rate": 5.00},
-            {"date": "2023-08-03", "rate": 5.25}, {"date": "2024-08-01", "rate": 5.00},
-            {"date": "2024-11-07", "rate": 4.75}, {"date": "2025-02-06", "rate": 4.50},
-            {"date": "2025-03-20", "rate": 4.25}, {"date": "2025-05-08", "rate": 4.00},
-        ]
-
-        # Build monthly from fallback
-        monthly = []
-        fc = fallback_changes
-        rate_idx = 0
-        current_rate = fc[0]["rate"]
-        for year in range(2000, now.year + 1):
-            for month in range(1, 13):
-                if year == now.year and month > now.month:
-                    break
-                ms = f"{year}-{month:02d}-01"
-                while rate_idx < len(fc) - 1 and fc[rate_idx + 1]["date"] <= ms:
-                    rate_idx += 1
-                    current_rate = fc[rate_idx]["rate"]
-                monthly.append({"date": ms, "rate": current_rate})
-
-        result = {
-            "current_rate": fc[-1]["rate"],
-            "current_date": fc[-1]["date"],
-            "history": monthly,
-            "changes": fc[-20:],
-            "fallback": True,
-            "fetch_error": str(e),
-        }
-
-        BOE_RATE_CACHE["data"] = result
-        BOE_RATE_CACHE["fetched"] = now
-
-        return jsonify(result)
+    """Bank of England base rate history. Fetching, the SQLite-backed cache
+    (shared by both gunicorn workers) and the hard-coded fallback history all
+    live in boe.py."""
+    return jsonify(boe.get_rates(get_db()))
 
 
 
@@ -1350,7 +1203,9 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
 
     if debug:
-        app.run(host="0.0.0.0", port=port, debug=True)
+        # The Werkzeug debugger executes arbitrary code, so debug mode only
+        # listens on loopback unless HOST is set explicitly.
+        app.run(host=os.environ.get("HOST", "127.0.0.1"), port=port, debug=True)
     else:
         # Production: use gunicorn
         import subprocess

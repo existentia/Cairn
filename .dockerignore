@@ -1,0 +1,15 @@
+# Keep the build context small and local state out of the image.
+.git
+.gitignore
+.env
+.claude
+.DS_Store
+data/
+docs/
+*.md
+frontend/node_modules/
+frontend/dist/
+backend/tests/
+**/__pycache__/
+**/*.pyc
+**/*.test.js

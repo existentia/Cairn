@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { T, Btn, NumberInput } from "../ui.jsx";
 import { fmtFull, ageFromDob } from "../advisor.js";
 import {
-  ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE,
+  ISA_ANNUAL_ALLOWANCE, PENSION_ANNUAL_ALLOWANCE, sumTaxYearContributions,
   LISA_ANNUAL_ALLOWANCE, LISA_BONUS_PCT, LISA_OPEN_MAX_AGE, LISA_CONTRIB_MAX_AGE,
   CGT_ANNUAL_ALLOWANCE, CGT_BASIC_RATE_PCT, CGT_HIGHER_RATE_PCT,
   PERSONAL_ALLOWANCE, PERSONAL_ALLOWANCE_TAPER_START, PERSONAL_ALLOWANCE_TAPER_END,
@@ -105,14 +105,17 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
   const taxYear = settings.tax_year || TAX_YEAR_LABEL;
   const region = settings.tax_region || "scotland";
   const age = ageFromDob(profile.dob);
+  // Thresholds below test income after workplace pension contributions
+  // (salary sacrifice), not the headline salary.
+  const incomeAfterPension = profile.gross_salary * (1 - (profile.pension_contrib_pct || 0) / 100);
   const days = daysUntilTaxYearEnd();
   const monthsLeft = Math.max(1, Math.ceil(days / 30.44));
 
   // ── ISA Allowance (incl. LISA, which counts toward the £20k overall) ──
-  const isaMonthly = accounts
-    .filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH" || a.type === "ISA_LISA")
-    .reduce((s, a) => s + (a.monthly_contrib || 0), 0);
-  const isaAnnual = isaMonthly * 12;
+  // Recorded "paid in so far" amounts where present, else monthly × 12.
+  const isaYear = sumTaxYearContributions(
+    accounts.filter((a) => a.type === "ISA_SS" || a.type === "ISA_CASH" || a.type === "ISA_LISA"));
+  const isaAnnual = Math.round(isaYear.projected);
   const isaAllowance = settings.isa_allowance || ISA_ANNUAL_ALLOWANCE;
   const isaRemaining = Math.max(0, isaAllowance - isaAnnual);
 
@@ -120,7 +123,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
   const lisaAccounts = accounts.filter((a) => a.type === "ISA_LISA");
   const hasLisa = lisaAccounts.length > 0;
   const canStillContribLisa = age < LISA_CONTRIB_MAX_AGE;
-  const lisaAnnual = lisaAccounts.reduce((s, a) => s + (a.monthly_contrib || 0), 0) * 12;
+  const lisaAnnual = Math.round(sumTaxYearContributions(lisaAccounts).projected);
   const lisaRemaining = Math.max(0, LISA_ANNUAL_ALLOWANCE - lisaAnnual);
   const lisaBonusMissed = Math.round(lisaRemaining * (LISA_BONUS_PCT / 100));
   const lisaBonusEarned = Math.round(Math.min(lisaAnnual, LISA_ANNUAL_ALLOWANCE) * (LISA_BONUS_PCT / 100));
@@ -130,8 +133,8 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
     * ((profile.pension_contrib_pct + profile.employer_contrib_pct) / 100);
   const dcMonthly = accounts.filter((a) => a.type === "PENSION_DC").reduce((s, a) => s + (a.monthly_contrib || 0), 0);
   // SIPP contribs are assumed RAS (net of 20% basic-rate relief at source) so gross up
-  const sippMonthlyGross = accounts.filter((a) => a.type === "SIPP").reduce((s, a) => s + (a.monthly_contrib || 0), 0) / 0.8;
-  const pensionAnnual = workplaceAnnual + (dcMonthly + sippMonthlyGross) * 12;
+  const sippYearGross = sumTaxYearContributions(accounts.filter((a) => a.type === "SIPP")).projected / 0.8;
+  const pensionAnnual = workplaceAnnual + dcMonthly * 12 + sippYearGross;
 
   const baseAA = settings.pension_annual_allowance || PENSION_ANNUAL_ALLOWANCE;
   let pensionAA = baseAA;
@@ -176,39 +179,39 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
     try { setCgtRealised(Number(localStorage.getItem(cgtKey)) || 0); } catch {}
   }, [cgtKey]);
   const cgtRate = (region === "scotland"
-    ? profile.gross_salary > SCOTLAND_HIGHER_RATE_THRESHOLD
-    : profile.gross_salary > RUK_HIGHER_RATE_THRESHOLD)
+    ? incomeAfterPension > SCOTLAND_HIGHER_RATE_THRESHOLD
+    : incomeAfterPension > RUK_HIGHER_RATE_THRESHOLD)
     ? CGT_HIGHER_RATE_PCT : CGT_BASIC_RATE_PCT;
   const cgtRemaining = Math.max(0, CGT_ANNUAL_ALLOWANCE - cgtRealised);
 
   // ── Personal Allowance taper (only if > £100k) ──
-  const showPA = profile.gross_salary > PERSONAL_ALLOWANCE_TAPER_START;
+  const showPA = incomeAfterPension > PERSONAL_ALLOWANCE_TAPER_START;
   const paTaperAmount = showPA
-    ? Math.min(profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START,
+    ? Math.min(incomeAfterPension - PERSONAL_ALLOWANCE_TAPER_START,
                PERSONAL_ALLOWANCE_TAPER_END - PERSONAL_ALLOWANCE_TAPER_START)
     : 0;
   const paLost = Math.round(paTaperAmount / 2);
-  const paRestoreSacrifice = Math.min(profile.gross_salary - PERSONAL_ALLOWANCE_TAPER_START, 25140);
+  const paRestoreSacrifice = Math.min(incomeAfterPension - PERSONAL_ALLOWANCE_TAPER_START, 25140);
 
   // ── HICBC (only if children + salary > £60k) ──
   const childrenCount = profile.children_count || 0;
-  const showHicbc = childrenCount > 0 && profile.gross_salary > HICBC_THRESHOLD_START;
+  const showHicbc = childrenCount > 0 && incomeAfterPension > HICBC_THRESHOLD_START;
   const cbAnnual = Math.round(
     CB_WEEKLY_FIRST_CHILD * 52
     + CB_WEEKLY_ADDITIONAL_CHILD * 52 * Math.max(0, childrenCount - 1)
   );
   const hicbcPct = showHicbc
-    ? Math.min(100, Math.max(0, Math.floor((profile.gross_salary - HICBC_THRESHOLD_START) / 200)))
+    ? Math.min(100, Math.max(0, Math.floor((incomeAfterPension - HICBC_THRESHOLD_START) / 200)))
     : 0;
   const hicbcClawed = Math.round(cbAnnual * hicbcPct / 100);
-  const hicbcSacrificeToZero = Math.round(profile.gross_salary - HICBC_THRESHOLD_START);
+  const hicbcSacrificeToZero = Math.round(incomeAfterPension - HICBC_THRESHOLD_START);
 
   // ── Marriage Allowance ──
   const higherRateThreshold = region === "scotland" ? SCOTLAND_HIGHER_RATE_THRESHOLD : RUK_HIGHER_RATE_THRESHOLD;
   const showMA = profile.spouse_income > 0
     && profile.spouse_income <= MARRIAGE_ALLOWANCE_SPOUSE_MAX
-    && profile.gross_salary > PERSONAL_ALLOWANCE
-    && profile.gross_salary < higherRateThreshold;
+    && incomeAfterPension > PERSONAL_ALLOWANCE
+    && incomeAfterPension < higherRateThreshold;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -251,7 +254,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
           color={T.accent}
           sub={
             isaRemaining > 0
-              ? <>From monthly contributions across S&amp;S, Cash and Lifetime ISAs. ~{fmtFull(Math.round(isaRemaining / monthsLeft))}/month for {monthsLeft} month{monthsLeft !== 1 ? "s" : ""} would max it out, or a one-off lump sum.</>
+              ? <>{isaYear.anyActual ? <>{fmtFull(Math.round(isaYear.paid))} recorded as paid in so far, plus regular contributions to 5 April.</> : <>From monthly contributions across S&amp;S, Cash and Lifetime ISAs.</>} ~{fmtFull(Math.round(isaRemaining / monthsLeft))}/month for {monthsLeft} month{monthsLeft !== 1 ? "s" : ""} would max it out, or a one-off lump sum.</>
               : <>Maxed for {taxYear} — well done. Allowance resets on 6 April.</>
           }
         />
@@ -348,7 +351,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
             total={PERSONAL_ALLOWANCE}
             color={T.red}
             sub={<>
-              Salary of {fmtFull(profile.gross_salary)} triggers the PA taper —
+              Income of {fmtFull(Math.round(incomeAfterPension))} after pension contributions triggers the PA taper —
               £1 lost per £2 over £{PERSONAL_ALLOWANCE_TAPER_START.toLocaleString()},
               creating a ~60% effective marginal rate in this band.
               A pension sacrifice of {fmtFull(paRestoreSacrifice)} would drag taxable income to £100k and fully restore the allowance.
@@ -366,7 +369,7 @@ export default function TaxYearDashboard({ profile, accounts, settings, onNaviga
             color={T.red}
             sub={<>
               {childrenCount} child{childrenCount !== 1 ? "ren" : ""} · {hicbcPct}% of {fmtFull(cbAnnual)}/yr Child Benefit reclaimed via the High Income Child Benefit Charge.
-              {profile.gross_salary < HICBC_THRESHOLD_END
+              {incomeAfterPension < HICBC_THRESHOLD_END
                 ? <> A pension sacrifice of {fmtFull(hicbcSacrificeToZero)} would drop adjusted net income below £{HICBC_THRESHOLD_START.toLocaleString()} and restore the full benefit.</>
                 : <> Fully clawed back above £{HICBC_THRESHOLD_END.toLocaleString()} — sacrifice down to £{HICBC_THRESHOLD_START.toLocaleString()} to recover.</>}
             </>}

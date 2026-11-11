@@ -136,43 +136,97 @@ PENSION_AA_HISTORY = {
     "2026/27": 60000,
 }
 
+# Pension tax-free cash: 25% of each withdrawal, capped in total by the
+# Lump Sum Allowance.
+PENSION_TAX_FREE_FRACTION = 0.25
+LUMP_SUM_ALLOWANCE = 268275
+
+# From 6 April 2029 only the first £2,000 a year of salary-sacrificed pension
+# contributions is exempt from NI (employee and employer); income tax relief
+# is unchanged. Applied only when a tool asks for the 2029 rules.
+SALARY_SACRIFICE_NI_CAP = 2000
+
 # ── Ages ──────────────────────────────────────────────────────────────────────
 
 PENSION_ACCESS_AGE = 57            # Rises from 55 to 57 in April 2028
-STATE_PENSION_AGE = 67             # Forward-looking; phased rise from 66
+STATE_PENSION_AGE = 67             # Fallback when no date of birth is known — prefer state_pension_age(dob)
 STATE_PENSION_ANNUAL_DEFAULT = 12548  # Full new State Pension 2026/27: £241.30/week
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def calc_tax_ni(gross_salary, sacrifice=0, region="scotland"):
-    """Income tax + NI for the current tax year. Returns a dict with
-    taxable_income, income_tax, employee_ni, employer_ni, take_home."""
-    taxable = gross_salary - sacrifice
+def state_pension_age(dob):
+    """Legislated State Pension age (whole years) for an ISO date of birth.
+
+    Pensions Acts 2007/2014: 66 for those born before 6 April 1960, 67 up to
+    5 April 1977, 68 from 6 April 1978. The two phased cohorts (born
+    6 Apr 1960 – 5 Mar 1961, and 6 Apr 1977 – 5 Apr 1978) reach it at an age
+    in years and months; they are rounded up to the next whole year so the
+    planning figure errs on the cautious side. ISO dates compare correctly
+    as strings. Falls back to STATE_PENSION_AGE if the date is unusable.
+    Mirror of statePensionAge() in frontend/src/constants.js.
+    """
+    import re
+    if not isinstance(dob, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dob):
+        return STATE_PENSION_AGE
+    if dob < "1960-04-06":
+        return 66
+    if dob < "1977-04-06":
+        return 67
+    return 68
+
+
+def personal_allowance(income):
+    """Personal Allowance after the taper: £1 lost per £2 of income over
+    £100k, gone entirely at £125,140."""
+    return max(0, PERSONAL_ALLOWANCE - max(0, income - PERSONAL_ALLOWANCE_TAPER_START) / 2)
+
+
+def calc_income_tax(income, region="scotland"):
+    """Income tax on `income` (after any salary sacrifice), unrounded.
+
+    The band tables give upper bounds as gross income assuming the full
+    Personal Allowance. In law the lower thresholds are amounts of *taxable*
+    income (so they sit at bound - PA), while the top-rate threshold is
+    £125,140 of taxable income outright. Running the tapered-PA taxable
+    figure through those limits is what produces the 60% (67.5% in Scotland)
+    marginal zone between £100k and £125,140.
+    Mirror of calcIncomeTax() in frontend/src/constants.js.
+    """
     bands = SCOTLAND_BANDS if region == "scotland" else RUK_BANDS
-
-    income_tax = 0
-    remaining = max(0, taxable - PERSONAL_ALLOWANCE)
-    prev_limit = PERSONAL_ALLOWANCE
+    taxable = max(0, income - personal_allowance(income))
+    tax = 0
+    prev = 0
     for limit, rate in bands:
-        band_width = limit - prev_limit
-        taxed = min(remaining, band_width)
-        income_tax += taxed * rate
-        remaining -= taxed
-        prev_limit = limit
-        if remaining <= 0:
+        upper = limit - PERSONAL_ALLOWANCE if limit < PERSONAL_ALLOWANCE_TAPER_END else limit
+        if taxable <= prev:
             break
+        tax += (min(taxable, upper) - prev) * rate
+        prev = upper
+    return tax
 
-    ni_earnings = max(0, taxable - NI_PRIMARY_THRESHOLD)
-    if taxable <= NI_UPPER_EARNINGS_LIMIT:
+
+def calc_tax_ni(gross_salary, sacrifice=0, region="scotland", ni_cap=None):
+    """Income tax + NI for the current tax year. Returns a dict with
+    taxable_income, income_tax, employee_ni, employer_ni, take_home.
+
+    `ni_cap` models the April 2029 rules: only the first `ni_cap` pounds of
+    the sacrifice escape NI, so NI is charged on gross minus that capped
+    amount. With ni_cap=None (today's rules) the whole sacrifice is NI-free."""
+    taxable = gross_salary - sacrifice
+    income_tax = calc_income_tax(taxable, region)
+    ni_base = taxable if ni_cap is None else gross_salary - min(sacrifice, ni_cap)
+
+    ni_earnings = max(0, ni_base - NI_PRIMARY_THRESHOLD)
+    if ni_base <= NI_UPPER_EARNINGS_LIMIT:
         employee_ni = ni_earnings * NI_RATE_MAIN
     else:
         employee_ni = (
             (NI_UPPER_EARNINGS_LIMIT - NI_PRIMARY_THRESHOLD) * NI_RATE_MAIN
-            + (taxable - NI_UPPER_EARNINGS_LIMIT) * NI_RATE_UEL_PLUS
+            + (ni_base - NI_UPPER_EARNINGS_LIMIT) * NI_RATE_UEL_PLUS
         )
 
-    employer_ni = max(0, taxable - NI_SECONDARY_THRESHOLD) * NI_RATE_EMPLOYER
+    employer_ni = max(0, ni_base - NI_SECONDARY_THRESHOLD) * NI_RATE_EMPLOYER
 
     return {
         "taxable_income": round(taxable),

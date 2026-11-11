@@ -5,13 +5,16 @@ from app.py to keep the top-level module manageable. They share the
 require_auth decorator from db_auth, and import tax tables from uk_tax.
 """
 
-from flask import Blueprint, jsonify, request
+import math
 
-from db_auth import require_auth
+from flask import Blueprint, jsonify
+
+from db_auth import require_auth, json_body, as_number, as_text, BadInput
 from uk_tax import (
     calc_tax_ni,
     IHT_NRB, IHT_RNRB, IHT_RNRB_TAPER_START,
     IHT_RATE_STANDARD, IHT_RATE_REDUCED, IHT_REDUCED_RATE_CHARITY_PCT,
+    SALARY_SACRIFICE_NI_CAP,
 )
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/api/tools")
@@ -23,25 +26,31 @@ tools_bp = Blueprint("tools", __name__, url_prefix="/api/tools")
 @require_auth
 def salary_sacrifice_calc():
     """Calculate the tax/NI savings from salary sacrifice pension contributions."""
-    data = request.get_json()
-    gross = data.get("gross_salary", 0)
-    current_pct = data.get("current_contrib_pct", 0)
-    proposed_pct = data.get("proposed_contrib_pct", 0)
-    employer_pct = data.get("employer_contrib_pct", 0)
+    data = json_body()
+    gross = as_number(data.get("gross_salary"), "gross_salary", 0)
+    current_pct = as_number(data.get("current_contrib_pct"), "current_contrib_pct", 0)
+    proposed_pct = as_number(data.get("proposed_contrib_pct"), "proposed_contrib_pct", 0)
+    employer_pct = as_number(data.get("employer_contrib_pct"), "employer_contrib_pct", 0)
     tax_region = data.get("tax_region", "scotland")
 
     current_sacrifice = gross * (current_pct / 100)
     proposed_sacrifice = gross * (proposed_pct / 100)
     employer_contrib = gross * (employer_pct / 100)
 
-    current = calc_tax_ni(gross, current_sacrifice, tax_region)
-    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region)
+    # Optional: the April 2029 rules, where NI relief on sacrificed pension
+    # contributions is capped at the first £2,000 a year.
+    apply_cap = bool(data.get("apply_2029_ni_cap", False))
+    ni_cap = SALARY_SACRIFICE_NI_CAP if apply_cap else None
+
+    current = calc_tax_ni(gross, current_sacrifice, tax_region, ni_cap)
+    proposed = calc_tax_ni(gross, proposed_sacrifice, tax_region, ni_cap)
 
     take_home_reduction = current["take_home"] - proposed["take_home"]
     pension_increase = proposed_sacrifice - current_sacrifice
     employer_ni_saving = current["employer_ni"] - proposed["employer_ni"]
 
     return jsonify({
+        "rules": {"ni_cap_2029": apply_cap, "ni_cap": SALARY_SACRIFICE_NI_CAP},
         "current": {
             **current,
             "pension_contrib": round(current_sacrifice),
@@ -74,18 +83,21 @@ def salary_sacrifice_calc():
 @require_auth
 def bonus_optimiser_calc():
     """Model receiving an annual bonus as cash vs sacrificing into pension."""
-    data = request.get_json()
-    gross = data.get("gross_salary", 0)
-    bonus = max(0, data.get("bonus", 0))
-    sacrifice_pct = max(0, min(100, data.get("sacrifice_pct", 100)))
+    data = json_body()
+    gross = as_number(data.get("gross_salary"), "gross_salary", 0)
+    bonus = max(0, as_number(data.get("bonus"), "bonus", 0))
+    sacrifice_pct = max(0, min(100, as_number(data.get("sacrifice_pct"), "sacrifice_pct", 100)))
     tax_region = data.get("tax_region", "scotland")
 
     sacrifice_amount = bonus * (sacrifice_pct / 100)
     bonus_kept = bonus - sacrifice_amount
 
+    apply_cap = bool(data.get("apply_2029_ni_cap", False))
+    ni_cap = SALARY_SACRIFICE_NI_CAP if apply_cap else None
+
     baseline = calc_tax_ni(gross, 0, tax_region)
     cash = calc_tax_ni(gross + bonus, 0, tax_region)
-    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region)
+    sacrifice = calc_tax_ni(gross + bonus, sacrifice_amount, tax_region, ni_cap)
 
     cash_extra_take_home = cash["take_home"] - baseline["take_home"]
     sacrifice_extra_take_home = sacrifice["take_home"] - baseline["take_home"]
@@ -96,6 +108,7 @@ def bonus_optimiser_calc():
     marginal_rate = (cash_tax_ni_paid / bonus * 100) if bonus > 0 else 0
 
     return jsonify({
+        "rules": {"ni_cap_2029": apply_cap, "ni_cap": SALARY_SACRIFICE_NI_CAP},
         "inputs": {
             "gross_salary": gross,
             "bonus": bonus,
@@ -130,12 +143,21 @@ def bonus_optimiser_calc():
 @tools_bp.route("/iht-estimator", methods=["POST"])
 @require_auth
 def iht_estimator():
-    """Estimate IHT due on an estate. Current-year allowances from uk_tax (NRB/RNRB frozen to April 2031)."""
-    data = request.get_json() or {}
-    estate = max(0, float(data.get("estate_value", 0)))
+    """Estimate IHT due on an estate. Current-year allowances from uk_tax (NRB/RNRB frozen to April 2031).
+    With include_pensions, pension_value is added to the estate (rules from 6 April 2027)."""
+    data = json_body()
+    estate = max(0, float(as_number(data.get("estate_value"), "estate_value", 0)))
     married = bool(data.get("married", False))
     has_residence = bool(data.get("has_residence", True))
-    charity = max(0, float(data.get("charitable_bequest", 0)))
+    charity = max(0, float(as_number(data.get("charitable_bequest"), "charitable_bequest", 0)))
+    # From 6 April 2027 unused pension pots count as part of the estate.
+    # `estate_value` is everything else; the pots are added only when the
+    # caller asks for the 2027 rules.
+    include_pensions = bool(data.get("include_pensions", False))
+    pension_value = max(0, float(as_number(data.get("pension_value"), "pension_value", 0)))
+    estate_ex_pensions = estate
+    if include_pensions:
+        estate += pension_value
     charity = min(charity, estate)
 
     nrb = IHT_NRB * (2 if married else 1)
@@ -165,6 +187,9 @@ def iht_estimator():
     return jsonify({
         "inputs": {
             "estate_value": round(estate),
+            "estate_ex_pensions": round(estate_ex_pensions),
+            "pension_value": round(pension_value),
+            "include_pensions": include_pensions,
             "married": married,
             "has_residence": has_residence,
             "charitable_bequest": round(charity),
@@ -194,12 +219,20 @@ def iht_estimator():
 @require_auth
 def debt_payoff_calc():
     """Compare avalanche vs snowball debt repayment strategies."""
-    data = request.get_json()
+    data = json_body()
     debts = data.get("debts", [])
-    extra_monthly = data.get("extra_monthly", 0)
+    extra_monthly = as_number(data.get("extra_monthly"), "extra_monthly", 0)
 
-    if not debts:
+    if not isinstance(debts, list) or not debts:
         return jsonify({"error": "No debts provided"}), 400
+    if not all(isinstance(d, dict) for d in debts):
+        raise BadInput("Each debt must be an object")
+    debts = [{
+        "name": as_text(d.get("name"), "name") or "Debt",
+        "balance": as_number(d.get("balance"), "balance"),
+        "rate": as_number(d.get("rate"), "rate"),
+        "min_payment": as_number(d.get("min_payment"), "min_payment"),
+    } for d in debts]
 
     def simulate(debts_list, extra, strategy="avalanche"):
         active = [{"name": d["name"], "balance": abs(d["balance"]), "rate": d["rate"],
@@ -269,11 +302,11 @@ def debt_payoff_calc():
 @require_auth
 def mortgage_scenarios():
     """Calculate mortgage payment scenarios at different rates."""
-    data = request.get_json()
-    balance = data.get("balance", 0)
-    current_rate = data.get("current_rate", 5.0)
-    remaining_years = data.get("remaining_years", 20)
-    margin = data.get("tracker_margin", 0.5)
+    data = json_body()
+    balance = as_number(data.get("balance"), "balance", 0)
+    current_rate = as_number(data.get("current_rate"), "current_rate", 5.0)
+    remaining_years = as_number(data.get("remaining_years"), "remaining_years", 20)
+    margin = as_number(data.get("tracker_margin"), "tracker_margin", 0.5)
 
     def calc_monthly_payment(principal, annual_rate, years):
         if annual_rate <= 0 or years <= 0:
@@ -288,7 +321,9 @@ def mortgage_scenarios():
 
     def calc_overpayment(principal, annual_rate, years, extra_monthly):
         if annual_rate <= 0:
-            return {"months": int(principal / max(extra_monthly + principal / (years * 12), 1)), "interest": 0, "saved_months": 0}
+            monthly = principal / max(years * 12, 1) + extra_monthly
+            months = math.ceil(principal / monthly) if monthly > 0 else 0
+            return {"months": months, "total_interest": 0, "saved_months": max(0, years * 12 - months)}
         r = annual_rate / 100 / 12
         bal = principal
         base_payment = calc_monthly_payment(principal, annual_rate, years)
